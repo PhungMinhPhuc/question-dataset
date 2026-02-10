@@ -1,0 +1,10 @@
+Sample
+build
+password.txt
+.env
+%OUTDIR%
+/%OUTDIR%/
+/storage/
+.venv
+.vscode
+/__pycache__/
