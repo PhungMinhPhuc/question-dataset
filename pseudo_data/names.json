@@ -1,0 +1,25 @@
+{
+    "ho": [
+        "Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng", 
+        "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đào", "Đoàn", "Vương", "Trịnh", 
+        "Đinh", "Lâm", "Phùng", "Mai", "Tô", "Trương", "Thái", "Châu", "Tạ", "Kiều",
+        "Tống", "Khương", "Đồng", "Giáp", "Lư", "Lương", "Nghiêm", "Quách", "Tôn", "Từ"
+    ],
+    "dem": [
+        "Thị", "Văn", "Hữu", "Minh", "Ngọc", "Thanh", "Hoài", "Thu", "Xuân", "Hồng", 
+        "Đức", "Quang", "Bá", "Quốc", "Đình", "Đại", "Phúc", "Gia", "Tuấn", "Trọng",
+        "Hải", "Lan", "Thảo", "Diệu", "Tú", "Bảo", "Nhật", "Kim", "Thiên", "Tường",
+        "Hoàng", "Như", "Cẩm", "Yến", "Mỹ", "Đan", "Phương", "Uyển", "Mai", "Cát",
+        "Trung", "Thế", "Khắc", "Mạnh", "Đăng", "Duy", "Anh", "Trí", "Kiến", "Thái"
+    ],
+    "ten": [
+        "Anh", "Bảo", "Cường", "Dũng", "Đạt", "Nam", "Hải", "Khoa", "Long", "Phong", 
+        "Sơn", "Tùng", "Việt", "Hùng", "Lâm", "Bình", "Chung", "Hoàng", "Tâm", "Thành", 
+        "Yến", "Trang", "Linh", "Mai", "Nhung", "Phương", "Quỳnh", "Thảo", "Thuỷ", "Tiên", 
+        "Trâm", "Uyên", "Vân", "Vy", "Chi", "Nga", "Diệp", "Giang", "Oanh", "Mỹ",
+        "Kiên", "Khánh", "Huy", "Hào", "Toàn", "Thắng", "Quân", "Nhân", "Khôi", "Bách",
+        "An", "Châu", "Đan", "Giao", "Hân", "Khuê", "Lan", "Mi", "Nguyệt", "Quế",
+        "Sang", "Thu", "Trinh", "Tú", "Sương", "Như", "Loan", "Hương", "Hà", "Duyên",
+        "Phát", "Lộc", "Nghĩa", "Tài", "Vinh", "Triết", "Khoa", "Vỹ", "Bằng", "Vũ"
+    ]
+}
