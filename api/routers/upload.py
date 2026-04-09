@@ -1,0 +1,295 @@
+import os
+import sys
+import uuid
+import shutil
+import zipfile
+import tempfile
+import traceback
+import asyncio
+import threading
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPException, Depends
+from db import get_cursor
+from auth import get_current_teacher
+from models import UploadConfirmRequest
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+ENGINE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "backend", "src", "engine")
+if ENGINE_PATH not in sys.path:
+    sys.path.insert(0, ENGINE_PATH)
+
+IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", "./storage")
+
+router = APIRouter(prefix="/upload", tags=["Upload"])
+
+# ── In-memory job store ───────────────────────────────────────────────────────
+# { job_id: { status, progress, total, result, error } }
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _set_job(job_id: str, **kwargs):
+    with _jobs_lock:
+        _jobs[job_id].update(kwargs)
+
+
+def _progress_cb(job_id: str, done: int, total: int):
+    _set_job(job_id, progress=done, total=total)
+
+
+# ── Background worker ─────────────────────────────────────────────────────────
+
+def _run_job(job_id: str, file_path: str, job_dir: str,
+             teacher_id: int, subject: str, grade: str,
+             chapter: str, lesson: str, complexity: int):
+    """Runs in a daemon thread; never raises — all errors go into _jobs."""
+    try:
+        # Imports are inside the try so a missing module sets status="error"
+        # instead of silently killing the thread and leaving status="processing".
+        from logic_manager import run_parser
+        from parse_docx import convert_docx_to_tex
+
+        fname = os.path.basename(file_path)
+
+        if fname.endswith(".zip"):
+            with zipfile.ZipFile(file_path, "r") as zf:
+                zf.extractall(job_dir)
+            tex_files = [
+                os.path.join(root, fn)
+                for root, _, files in os.walk(job_dir)
+                for fn in files if fn.endswith(".tex")
+            ]
+            if not tex_files:
+                raise ValueError("Không tìm thấy file .tex trong ZIP")
+            final_tex = tex_files[0]
+            img_dir = IMG_STORAGE_PATH
+
+        elif fname.endswith(".docx"):
+            media_dir = os.path.join(job_dir, "media")
+            os.makedirs(media_dir, exist_ok=True)
+
+            final_tex = convert_docx_to_tex(
+                file_path, media_dir,
+                progress_cb=lambda d, t: _progress_cb(job_id, d, t),
+            )
+            # Images must go into IMG_STORAGE_PATH so the static file server
+            # can find them at /static/images/...  Using media_dir (a temp
+            # folder) caused 404s because the URL mapping always references
+            # IMG_STORAGE_PATH.
+            img_dir = IMG_STORAGE_PATH
+
+        else:  # .tex
+            final_tex = file_path
+            img_dir = IMG_STORAGE_PATH
+
+        results = run_parser(
+            final_tex, teacher_id, subject, grade,
+            chapter, lesson, complexity, img_dir,
+        )
+
+        # Rewrite image storage paths to relative URLs
+        for item in results:
+            for img in item.get("table_images", []):
+                sp = img.get("storage_path")
+                if sp:
+                    try:
+                        rel = os.path.relpath(sp, IMG_STORAGE_PATH)
+                        img["url"] = f"/static/images/{rel.replace(os.sep, '/')}"
+                    except Exception:
+                        img["url"] = None
+
+        _set_job(job_id, status="done", result=results)
+
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(f"[upload job {job_id}] ERROR: {exc}\n{tb}")
+        _set_job(job_id, status="error", error=str(exc), traceback=tb)
+    finally:
+        # job_dir is a temp directory that held the uploaded file and pandoc
+        # working files.  Images for successful jobs are now in IMG_STORAGE_PATH,
+        # so job_dir can always be removed.
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post("/tex")
+async def upload_tex(
+    file: UploadFile = File(...),
+    teacher_id: int = Form(...),
+    subject: str = Form(...),
+    grade: str = Form(...),
+    chapter: str = Form(""),
+    lesson: str = Form(""),
+    complexity: int = Form(1),
+    current_user: dict = Depends(get_current_teacher),
+):
+    """
+    Accept a .tex, .zip, or .docx file.
+
+    For .docx files with MathType equations the conversion can take several
+    minutes (pix2tex OCR per equation).  The endpoint returns a job_id
+    immediately; poll GET /upload/job/{job_id} for progress and result.
+
+    For .tex / .zip files the response is synchronous (fast).
+    """
+    if not file.filename.endswith((".tex", ".zip", ".docx")):
+        raise HTTPException(400, "Chỉ chấp nhận .tex, .zip hoặc .docx")
+
+    os.makedirs(IMG_STORAGE_PATH, exist_ok=True)
+
+    job_id = str(uuid.uuid4())
+    job_dir = tempfile.mkdtemp(prefix=f"job_{job_id[:8]}_")
+
+    raw = await file.read()
+    file_path = os.path.join(job_dir, file.filename)
+    with open(file_path, "wb") as fh:
+        fh.write(raw)
+
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "status": "processing",
+            "progress": 0,
+            "total": 0,
+            "result": None,
+            "error": None,
+        }
+
+    t = threading.Thread(
+        target=_run_job,
+        args=(job_id, file_path, job_dir,
+              teacher_id, subject, grade, chapter, lesson, complexity),
+        daemon=True,
+    )
+    t.start()
+
+    # Wait up to 60 s for the job to finish so the response is synchronous
+    # for the common case (tex, zip, and docx without many MathType equations).
+    # Only MathType-heavy DOCX files (many pix2tex calls) will exceed this and
+    # fall through to return a job_id for the frontend to poll.
+    try:
+        await asyncio.wait_for(asyncio.to_thread(t.join, 60), timeout=60)
+    except asyncio.TimeoutError:
+        pass
+
+    with _jobs_lock:
+        job = dict(_jobs[job_id])
+
+    if job["status"] == "done":
+        return {"job_id": job_id, "status": "done",
+                "count": len(job["result"]), "data": job["result"]}
+    if job["status"] == "error":
+        detail = job["error"]
+        if job.get("traceback"):
+            detail += "\n\n" + job["traceback"]
+        raise HTTPException(500, detail=detail)
+
+    # Still processing after 60 s — only happens for MathType-heavy DOCX.
+    # The frontend should poll GET /upload/job/{job_id} for the result.
+    return {"job_id": job_id, "status": "processing",
+            "progress": job["progress"], "total": job["total"]}
+
+
+@router.get("/job/{job_id}")
+async def get_job_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_teacher),
+):
+    """Poll conversion progress and retrieve result when done."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+
+    if job is None:
+        raise HTTPException(404, "Job không tồn tại hoặc đã hết hạn")
+
+    if job["status"] == "error":
+        raise HTTPException(500, detail=job["error"])
+
+    response = {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress": job["progress"],
+        "total": job["total"],
+    }
+    if job["status"] == "done":
+        response["count"] = len(job["result"])
+        response["data"] = job["result"]
+    return response
+
+
+# ── Confirm (unchanged) ───────────────────────────────────────────────────────
+
+@router.post("/confirm")
+def confirm_upload(body: UploadConfirmRequest,
+                   current_user: dict = Depends(get_current_teacher)):
+    """Receive reviewed JSON and persist to database."""
+    id_map: dict[str, int] = {}
+
+    with get_cursor() as (cur, conn):
+        for item in body.data:
+            q = item["table_question"]
+            q["teacher_id"] = current_user["user_id"]
+            q["grade"] = body.grade
+            q["subject"] = body.subject
+
+            internal_parent_id = id_map.get(q.get("parent_id")) if q.get("parent_id") else None
+
+            cur.execute(
+                """
+                INSERT INTO questions (
+                    teacher_id, public_id, subject, grade, parent_id,
+                    question_type, layout_type, content, solution,
+                    chapter, lesson, complexity, is_shufflable
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
+                """,
+                (
+                    q["teacher_id"], q.get("public_id") or str(uuid.uuid4()),
+                    q["subject"], q["grade"], internal_parent_id,
+                    q.get("question_type"), q.get("layout_type"),
+                    q.get("content"), q.get("solution"),
+                    q.get("chapter", ""), q.get("lesson", ""),
+                    q.get("complexity", 1), q.get("is_shufflable", True),
+                ),
+            )
+            new_id = cur.fetchone()["id"]
+            if q.get("public_id"):
+                id_map[q["public_id"]] = new_id
+
+            for img in item.get("table_images", []):
+                cur.execute(
+                    "INSERT INTO q_images (question_id, storage_path, img_type, img_scale, raw_code) VALUES (%s,%s,%s,%s,%s)",
+                    (new_id, img.get("storage_path"), img.get("img_type"),
+                     img.get("img_scale"), img.get("raw_code")),
+                )
+
+            details = item.get("table_details", {})
+            target = details.get("target_table")
+            records = details.get("records", [])
+
+            if target == "q_choice_details":
+                for idx, rec in enumerate(records):
+                    cur.execute(
+                        "INSERT INTO q_choice_details (question_id, content, is_correct, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s)",
+                        (new_id, rec["content"], rec.get("is_correct", False),
+                         rec.get("order_index", idx), rec.get("is_shufflable", True)),
+                    )
+            elif target == "q_truefalse_details":
+                for idx, rec in enumerate(records):
+                    cur.execute(
+                        "INSERT INTO q_truefalse_details (question_id, content, is_correct, explaination, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s,%s)",
+                        (new_id, rec["content"], rec.get("is_correct", False),
+                         rec.get("explaination") or rec.get("explanation"),
+                         rec.get("order_index", idx), rec.get("is_shufflable", True)),
+                    )
+            elif target == "q_shortans_details":
+                for rec in records:
+                    cur.execute(
+                        "INSERT INTO q_shortans_details (question_id, content) VALUES (%s,%s)",
+                        (new_id, rec["content"]),
+                    )
+
+        conn.commit()
+
+    return {"message": f"Đã lưu {len(body.data)} câu hỏi vào database"}
