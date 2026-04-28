@@ -1,0 +1,268 @@
+'use client';
+
+import { useEffect, useRef, useState, useCallback } from 'react';
+import ImageEditorModal, { ImageEditResult } from './ImageEditorModal';
+
+interface Props {
+ content: string;
+ className?: string;
+ layoutType?: string;
+ images?: { storage_path: string; img_scale?: number; img_type?: string }[];
+ editable?: boolean;
+}
+
+declare global {
+ interface Window {
+ MathJax?: {
+  typesetPromise: (elements?: HTMLElement[]) => Promise<void>;
+  typesetClear: (elements?: HTMLElement[]) => void;
+ };
+ }
+}
+
+export default function LatexRenderer({ content, className = '', layoutType = 'normal', images = [], editable = false }: Props) {
+ const ref = useRef<HTMLDivElement>(null);
+ const editableRef = useRef(editable);
+ editableRef.current = editable;
+ const [editingSrc, setEditingSrc] = useState<string | null>(null);
+ const [editingEl, setEditingEl] = useState<HTMLImageElement | null>(null);
+
+ // Click delegation — runs once on mount, checks editableRef at call time
+ useEffect(() => {
+  const container = ref.current;
+  if (!container) return;
+  const handleClick = (e: MouseEvent) => {
+   if (!editableRef.current) return;
+   const img = (e.target as Element).closest('img') as HTMLImageElement | null;
+   if (img) {
+    setEditingSrc(img.src);
+    setEditingEl(img);
+   }
+  };
+  container.addEventListener('click', handleClick);
+  return () => container.removeEventListener('click', handleClick);
+ }, []);
+
+ const handleSave = useCallback(async (result: ImageEditResult) => {
+  if (!editingEl || !editingSrc) return;
+
+  const url = new URL(editingSrc, window.location.href);
+  const imgPath = url.pathname
+   .replace(/^\/api/, '')
+   .replace(/^\/static\/images\//, '');
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  if (result.kind === 'scale') {
+   // SVG: chỉ lưu tỉ lệ vào DB, không sửa file.
+   const fd = new FormData();
+   fd.append('img_path', imgPath);
+   fd.append('scale', String(result.scale));
+   const res = await fetch('/api/questions/images/scale', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+   });
+   if (!res.ok) throw new Error('Save failed');
+   editingEl.style.zoom = String(result.scale * 1.5);
+   setEditingSrc(null);
+   setEditingEl(null);
+   return;
+  }
+
+  const formData = new FormData();
+  formData.append('img_path', imgPath);
+  formData.append('file', result.blob, 'edited.png');
+
+  const res = await fetch('/api/questions/images/edit', {
+   method: 'POST',
+   headers: token ? { Authorization: `Bearer ${token}` } : {},
+   body: formData,
+  });
+  if (!res.ok) throw new Error('Save failed');
+
+  const newSrc = editingSrc.split('?')[0] + '?t=' + Date.now();
+  editingEl.src = newSrc;
+  setEditingSrc(null);
+  setEditingEl(null);
+ }, [editingSrc, editingEl]);
+
+ useEffect(() => {
+ if (!ref.current || !content) return;
+
+ let extractedImages: string[] = [];
+
+ // Convert markdown image syntax ![alt](src) to HTML <img> tags
+ let cleaned = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
+  // Normalize path: ensure it starts with / for API serving
+  let imgSrc = src.replace(/\\\\/g, '/');
+  if (!imgSrc.startsWith('http')) {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+      if (apiUrl.endsWith('/') && imgSrc.startsWith('/')) {
+          imgSrc = apiUrl + imgSrc.slice(1);
+      } else if (!apiUrl.endsWith('/') && !imgSrc.startsWith('/')) {
+          imgSrc = apiUrl + '/' + imgSrc;
+      } else {
+          imgSrc = apiUrl + imgSrc;
+      }
+  }
+  
+  let scale = 1;
+  if (images && images.length > 0) {
+      const matchName = imgSrc.split('/').pop();
+      if (matchName) {
+          const imgInfo = images.find(img => img.storage_path && img.storage_path.replace(/\\\\/g, '/').endsWith(matchName));
+          if (imgInfo && imgInfo.img_scale) {
+              scale = imgInfo.img_scale;
+          }
+      }
+  }
+
+  if (layoutType.startsWith('immini')) {
+      const imgHtml = `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; border-radius: var(--radius-sm); border: 1px solid var(--border); object-fit: contain;"/>`;
+      extractedImages.push(imgHtml);
+      return '';
+  }
+  return `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; display:block; margin: 10px auto; object-fit: contain;"/>`;
+ });
+
+ // [Backwards compat] Remove TikZ blocks from old DB records
+ cleaned = cleaned
+  .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, '')
+  .replace(/\\tikz\s*\[[^\]]*\]\s*\{[\s\S]*?\}/g, '')
+  .replace(/\\tikz\s*\{[\s\S]*?\}/g, '');
+
+ // Remove other visual-only LaTeX environments
+ cleaned = cleaned
+  .replace(/\\begin\{center\}|\\end\{center\}/g, '')
+  .replace(/\\begin\{figure\*?\}[\s\S]*?\\end\{figure\*?\}/g, '')
+  .replace(/\\begin\{table\*?\}(?:\[[^\]]*\])?/g, '')
+  .replace(/\\end\{table\*?\}/g, '')
+  .replace(/\\caption\{([^}]*)\}/g, '<div style="text-align: center; font-style: italic; font-size: 0.9em; margin-top: 0.5rem; color: var(--text-secondary);">$1</div>')
+  .replace(/\\centering/g, '')
+  .replace(/\\includegraphics\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g, '');
+
+ // Convert tabular to HTML table
+ cleaned = cleaned.replace(/\\begin\{(tabular|tabularx|longtable|array)\}(?:\[[^\]]*\])?(?:\{[^}]*\})*([\s\S]*?)\\end\{\1\}/g, (match, envName, tableContent) => {
+  let html = '<div style="overflow-x: auto; margin: 1rem 0;"><table style="border-collapse: collapse; width: 100%; font-size: 0.9em;">';
+  const rows = tableContent.split(/\\\\/);
+  rows.forEach((row: string) => {
+  let r = row.replace(/\\hline/g, '').replace(/\\cline\{[^}]*\}/g, '').trim();
+  if (!r) return;
+  html += '<tr>';
+  const cells = r.split(/(?<!\\)&/);
+  cells.forEach((cell: string) => {
+   let cellContent = cell.trim();
+   let colspan = 1;
+   
+   const multiMatch = cellContent.match(/^\\multicolumn\{(\d+)\}\{[^}]*\}\{([\s\S]*)\}$/);
+   if (multiMatch) {
+    colspan = parseInt(multiMatch[1], 10);
+    cellContent = multiMatch[2];
+   }
+   
+   html += `<td colspan="${colspan}" style="border: 1px solid var(--border); padding: 0.5rem; text-align: center;">${cellContent}</td>`;
+  });
+  html += '</tr>';
+  });
+  html += '</table></div>';
+  // Temporarily encode to avoid <br/> conversion later
+  return html.replace(/\\\\/g, ''); 
+ });
+
+ // Convert itemize to HTML lists
+ cleaned = cleaned.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, listContent) => {
+  let html = '<ul style="margin-left: 1.5rem; margin-top: 0.5rem; list-style-type: disc;">';
+  const items = listContent.split(/\\item\s*/).filter((i: string) => i.trim());
+  items.forEach((item: string) => {
+  html += `<li style="margin-bottom: 0.25rem;">${item.trim()}</li>`;
+  });
+  html += '</ul>';
+  return html;
+ });
+
+ // Convert enumerate to HTML lists
+ cleaned = cleaned.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, listContent) => {
+  let html = '<ol style="margin-left: 1.5rem; margin-top: 0.5rem;">';
+  const items = listContent.split(/\\item\s*/).filter((i: string) => i.trim());
+  items.forEach((item: string) => {
+  html += `<li style="margin-bottom: 0.25rem;">${item.trim()}</li>`;
+  });
+  html += '</ol>';
+  return html;
+ });
+
+  const parts = cleaned.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g);
+  
+  cleaned = parts.map(part => {
+    // Nếu là display math
+    if (part.startsWith('$$') && part.endsWith('$$')) return part;
+    
+    // Nếu là inline math
+    if (part.startsWith('$') && part.endsWith('$')) {
+      const inner = part.slice(1, -1);
+      if (!inner.includes('\\displaystyle')) {
+        return `$\\displaystyle ${inner}$`;
+      }
+      return part;
+    }
+    
+    // Nếu là text thường, áp dụng các regex format HTML
+    return part
+      .replace(/\\newline/g, '<br/>')
+      .replace(/\\\\/g, '<br/>')
+      .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+      .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
+      .replace(/\\underline\{([^}]+)\}/g, '<u>$1</u>')
+      .replace(/\\text\{([^}]+)\}/g, '$1')
+      .replace(/\\hspace\*?\{[^}]*\}/g, ' ')
+      .replace(/\\vspace\*?\{[^}]*\}/g, '')
+      .replace(/\\noindent/g, '')
+      .replace(/\\medskip|\\bigskip|\\smallskip/g, '<br/>');
+  }).join('');
+
+  if (layoutType.startsWith('immini') && extractedImages.length > 0) {
+      cleaned = `
+        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; justify-content: space-between;">
+          <div style="flex: 1 1 300px; min-width: 0;">
+            ${cleaned}
+          </div>
+          <div style="flex: 0 1 auto; max-width: 55%; display: flex; flex-direction: column; gap: 1rem; align-items: flex-end;">
+            ${extractedImages.join('')}
+          </div>
+        </div>
+      `;
+  }
+
+  ref.current.innerHTML = cleaned;
+
+  if (editable) {
+   ref.current.querySelectorAll('img').forEach((img) => {
+    (img as HTMLImageElement).style.cursor = 'pointer';
+   });
+  }
+
+ // Trigger MathJax to re-render
+ if (window.MathJax?.typesetPromise) {
+  window.MathJax.typesetClear([ref.current]);
+  window.MathJax.typesetPromise([ref.current]).catch(console.error);
+ }
+ }, [content, layoutType, editable]);
+
+ if (!content) return null;
+
+ return (
+  <>
+   <div
+    ref={ref}
+    className={`latex-content ${className}`}
+   />
+   {editingSrc && (
+    <ImageEditorModal
+     src={editingSrc}
+     onSave={handleSave}
+     onClose={() => { setEditingSrc(null); setEditingEl(null); }}
+    />
+   )}
+  </>
+ );
+}
