@@ -14,6 +14,8 @@ interface Props {
   placeholder?: string;
   imageEditable?: boolean;
   images?: EditorImage[];
+  minHeight?: string;
+  maxHeight?: string;
 }
 
 function imgBasename(src: string): string {
@@ -24,6 +26,76 @@ function scaleForSrc(src: string, images?: EditorImage[]): number {
   const base = imgBasename(src);
   const info = images?.find(i => (i.storage_path || '').replace(/\\/g, '/').split('?')[0].endsWith(base));
   return info?.img_scale ? Number(info.img_scale) : 1;
+}
+
+// ── WYSIWYG: chuyển đổi giữa LaTeX định dạng và HTML cho ô soạn ───────────────
+// Người dùng không cần thấy \textbf{}, \underline{}, \hl{} — họ thấy chữ đậm, gạch
+// chân, tô nền trực tiếp (như Word) và tự định dạng bằng thanh công cụ.
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function latexToHtml(val: string): string {
+  let s = escapeHtml(val ?? '');
+  // Vài lượt để xử lý lồng một mức (vd \textbf{\underline{x}}).
+  for (let k = 0; k < 4; k++) {
+    s = s
+      .replace(/\\textbf\{([^{}]*)\}/g, '<b>$1</b>')
+      .replace(/\\textit\{([^{}]*)\}/g, '<i>$1</i>')
+      .replace(/\\emph\{([^{}]*)\}/g, '<i>$1</i>')
+      .replace(/\\underline\{([^{}]*)\}/g, '<u>$1</u>')
+      .replace(/\\ul\{([^{}]*)\}/g, '<u>$1</u>')
+      .replace(/\\hl\{([^{}]*)\}/g, '<span style="background-color:#fff3a3;border-radius:2px;padding:0 .1em;">$1</span>');
+  }
+  // Ký tự LaTeX bị escape → hiện lại dạng thường để người dùng không thấy "\%".
+  s = s.replace(/\\%/g, '%').replace(/\\#/g, '#').replace(/\\_/g, '_').replace(/\\&amp;/g, '&amp;');
+  
+  // Xử lý xuống dòng:
+  s = s.replace(/\\\\/g, '<br>').replace(/\\newline/g, '<br>');
+  s = s.replace(/\n\n/g, '<br><br>');
+  
+  return s;
+}
+
+function serializeNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    // Escape lại ký tự đặc biệt LaTeX trong văn bản (vd % -> \%) để xuất .tex an toàn.
+    return (node.textContent || '')
+      .replace(/%/g, '\\%')
+      .replace(/#/g, '\\#')
+      .replace(/&/g, '\\&');
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'br') return '\n';
+  let inner = '';
+  el.childNodes.forEach((c) => { inner += serializeNode(c); });
+  if (tag === 'div' || tag === 'p') {
+    if (el.previousSibling) return `\n${inner}`;
+    return inner;
+  }
+  if (inner === '') return '';
+  const style = el.getAttribute('style') || '';
+  const bold = tag === 'b' || tag === 'strong' || /font-weight\s*:\s*(bold|[6-9]00)/i.test(style);
+  const italic = tag === 'i' || tag === 'em' || /font-style\s*:\s*italic/i.test(style);
+  const underline = tag === 'u' || /text-decoration[^;"']*underline/i.test(style);
+  const highlight =
+    tag === 'mark' ||
+    (/background(-color)?\s*:/i.test(style) && !/transparent|rgba?\(0,\s*0,\s*0,\s*0\)/i.test(style));
+  if (underline) inner = `\\underline{${inner}}`;
+  if (italic) inner = `\\textit{${inner}}`;
+  if (highlight) inner = `\\hl{${inner}}`;
+  if (bold) inner = `\\textbf{${inner}}`;
+  return inner;
+}
+
+function htmlToLatex(html: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  let out = '';
+  div.childNodes.forEach((c) => { out += serializeNode(c); });
+  return out.replace(/ /g, ' ');
 }
 
 type Token = { id: string; type: 'text' | 'inline_math' | 'display_math' | 'image'; val: string };
@@ -71,7 +143,7 @@ function resolveImgSrc(val: string): string {
   return apiUrl + src;
 }
 
-export default function RichLatexEditor({ content, onChange, placeholder, imageEditable = false, images = [] }: Props) {
+export default function RichLatexEditor({ content, onChange, placeholder, imageEditable = false, images = [], minHeight, maxHeight }: Props) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [editingMathIdx, setEditingMathIdx] = useState<number | null>(null);
   const [tempMathVal, setTempMathVal] = useState('');
@@ -212,16 +284,116 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
     setEditingImg(null);
   }, [editingImg, tokens, onChange]);
 
+  // Áp định dạng cho vùng đang chọn trong ô soạn (B/I/U) — như Word/Docs. Bold/italic/
+  // underline của execCommand vốn đã tự bật/tắt khi bấm lại.
+  const applyFormat = (cmd: string, value?: string) => {
+    try { document.execCommand('styleWithCSS', false, 'true'); } catch { /* noop */ }
+    document.execCommand(cmd, false, value);
+  };
+
+  // Click vào vùng trống của ô (không trúng chữ) → đặt con trỏ ở vị trí gần nhất với tọa độ chuột
+  // Sử dụng API gốc của trình duyệt để xử lý chính xác ngay cả khi một thẻ span chứa nhiều dòng văn bản.
+  const handleBoxMouseDown = (e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return; // bấm trúng chữ/công thức thì để mặc định
+    const textSpans = Array.from(e.currentTarget.querySelectorAll('span[data-token-idx]')) as HTMLElement[];
+    if (textSpans.length === 0) return;
+    
+    e.preventDefault();
+    
+    const place = () => {
+      let range: Range | null = null;
+      
+      // Lấy vị trí văn bản chính xác dựa trên tọa độ click
+      if (document.caretRangeFromPoint) {
+        range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      } else if ((document as any).caretPositionFromPoint) {
+        const pos = (document as any).caretPositionFromPoint(e.clientX, e.clientY);
+        if (pos) {
+          range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
+        }
+      }
+      
+      if (range) {
+        // Tìm textSpan chứa vị trí này để gọi focus() (bắt buộc phải có để contentEditable nhận focus)
+        let node: Node | null = range.startContainer;
+        while (node && node !== e.currentTarget) {
+          if (node.nodeType === Node.ELEMENT_NODE && (node as Element).hasAttribute('data-token-idx')) {
+            (node as HTMLElement).focus();
+            
+            // Đặt lại vùng chọn đúng vị trí chuột
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+            return; // Đã xử lý xong
+          }
+          node = node.parentNode;
+        }
+        
+        // Nếu không tìm được thẻ textSpan nào bao ngoài (click quá xa, hoặc click vào chính wrapper div)
+        // -> Đặt con trỏ vào cuối cùng của span cuối
+        const last = textSpans[textSpans.length - 1];
+        last.focus();
+        const r = document.createRange();
+        r.selectNodeContents(last);
+        r.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        
+      } else {
+        // Fallback: nếu API không hỗ trợ, về cuối cùng
+        const last = textSpans[textSpans.length - 1];
+        last.focus();
+        const r = document.createRange();
+        r.selectNodeContents(last);
+        r.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+      }
+    };
+    
+    place();
+    requestAnimationFrame(place);
+  };
+
+  // Tô nền: bấm 1 lần để tô, bấm lần nữa để xóa (toggle).
+  const toggleHighlight = () => {
+    try { document.execCommand('styleWithCSS', false, 'true'); } catch { /* noop */ }
+    let v = '';
+    try { v = String(document.queryCommandValue('hiliteColor') || ''); } catch { /* noop */ }
+    if (!v) { try { v = String(document.queryCommandValue('backColor') || ''); } catch { /* noop */ } }
+    const norm = v.replace(/\s+/g, '').toLowerCase();
+    const isOn = norm.includes('255,243,163') || norm.includes('#fff3a3');
+    document.execCommand('hiliteColor', false, isOn ? 'transparent' : '#fff3a3');
+  };
+
+  const toolBtn: React.CSSProperties = {
+    minWidth: 34, height: 32, padding: '0 10px',
+    border: 'none', borderRight: '1px solid var(--border-strong)',
+    background: 'transparent', cursor: 'pointer',
+    fontSize: '0.95rem', color: 'var(--text-primary)', lineHeight: 1,
+  };
+
   return (
     <div>
       <div
         style={{
           position: 'relative',
-          border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-          padding: '0.75rem 1rem', background: 'var(--bg-surface)',
-          minHeight: '3rem', lineHeight: 2,
-          overflowX: 'auto',
+          border: `1.5px solid ${isFocused ? 'var(--accent-primary)' : '#cbd5e1'}`,
+          borderRadius: '8px',
+          padding: '0.85rem 1rem', 
+          background: '#ffffff',
+          minHeight: minHeight || '3rem',
+          maxHeight: maxHeight,
+          overflowY: maxHeight ? 'auto' : 'visible',
+          lineHeight: 2,
+          transition: 'all 0.2s',
+          boxShadow: isFocused ? '0 0 0 4px rgba(79,70,229,0.15)' : 'none',
         }}
+        onMouseDown={handleBoxMouseDown}
         onFocus={() => setIsFocused(true)}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -230,7 +402,7 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
         }}
       >
         {tokens.every(t => t.type === 'text' && !t.val) && !isFocused && (
-          <span style={{ position: 'absolute', top: '0.75rem', left: '1rem', color: 'var(--text-muted)', pointerEvents: 'none', userSelect: 'none' }}>{placeholder || 'Nhập nội dung...'}</span>
+          <span style={{ position: 'absolute', top: '0.75rem', left: '1rem', color: 'var(--text-placeholder)', pointerEvents: 'none', userSelect: 'none' }}>{placeholder || 'Nhập nội dung...'}</span>
         )}
 
         {tokens.map((token, idx) => {
@@ -241,7 +413,7 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
                 data-token-idx={idx}
                 contentEditable
                 suppressContentEditableWarning
-                onBlur={e => updateText(idx, e.currentTarget.innerText ?? '')}
+                onBlur={e => updateText(idx, htmlToLatex(e.currentTarget.innerHTML))}
                 onKeyDown={(e) => {
                   if (e.key === 'Backspace') {
                     const sel = window.getSelection();
@@ -249,7 +421,7 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
                     if (sel && sel.isCollapsed && sel.focusOffset === 0) {
                       if (idx > 0) {
                         e.preventDefault();
-                        const currentVal = e.currentTarget.innerText ?? '';
+                        const currentVal = htmlToLatex(e.currentTarget.innerHTML);
                         const next = [...tokens];
                         next[idx] = { ...next[idx], val: currentVal };
                         
@@ -354,15 +526,14 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
                     }
                   }
                 }}
-                style={{ 
-                  outline: 'none', 
+                style={{
+                  outline: 'none',
                   whiteSpace: 'pre-wrap',
                   display: token.val === '' ? 'inline-block' : 'inline',
                   minWidth: token.val === '' ? '10px' : 'auto',
                 }}
-              >
-                {token.val}
-              </span>
+                dangerouslySetInnerHTML={{ __html: latexToHtml(token.val) }}
+              />
             );
           }
 
@@ -432,8 +603,20 @@ export default function RichLatexEditor({ content, onChange, placeholder, imageE
         })}
       </div>
 
-      <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-        <button className="btn btn-secondary btn-sm" onClick={insertMath}>+ Chèn công thức</button>
+      <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'inline-flex', border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'var(--bg-surface)' }}>
+          <button type="button" title="Đậm" style={{ ...toolBtn, fontWeight: 700 }}
+            onMouseDown={(e) => { e.preventDefault(); applyFormat('bold'); }}>B</button>
+          <button type="button" title="Nghiêng" style={{ ...toolBtn, fontStyle: 'italic' }}
+            onMouseDown={(e) => { e.preventDefault(); applyFormat('italic'); }}>I</button>
+          <button type="button" title="Gạch chân" style={{ ...toolBtn, textDecoration: 'underline' }}
+            onMouseDown={(e) => { e.preventDefault(); applyFormat('underline'); }}>U</button>
+          <button type="button" title="Tô nền (bấm lần nữa để xóa)" style={{ ...toolBtn, borderRight: 'none' }}
+            onMouseDown={(e) => { e.preventDefault(); toggleHighlight(); }}>
+            <span style={{ background: '#fff3a3', borderRadius: 2, padding: '0 4px' }}>A</span>
+          </button>
+        </div>
+        <button className="btn btn-secondary btn-sm" onMouseDown={(e) => e.preventDefault()} onClick={insertMath}>Chèn công thức</button>
       </div>
 
       {editingMathIdx !== null && portalTarget && createPortal(

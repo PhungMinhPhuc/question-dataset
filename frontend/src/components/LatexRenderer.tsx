@@ -118,11 +118,11 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
   }
 
   if (layoutType.startsWith('immini')) {
-      const imgHtml = `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; border-radius: var(--radius-sm); border: 1px solid var(--border); object-fit: contain;"/>`;
+      const imgHtml = `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; border-radius: var(--radius-sm); border: 1px solid var(--border); object-fit: contain; background-color: #fff;"/>`;
       extractedImages.push(imgHtml);
       return '';
   }
-  return `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; display:block; margin: 10px auto; object-fit: contain;"/>`;
+  return `<img src="${imgSrc}" alt="${alt || 'Hình vẽ'}" style="max-width:100%; width:auto; height:auto; zoom:${scale*1.5}; display:block; margin: 10px auto; object-fit: contain; background-color: #fff;"/>`;
  });
 
  // [Backwards compat] Remove TikZ blocks from old DB records
@@ -208,12 +208,24 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
     
     // Nếu là text thường, áp dụng các regex format HTML
     return part
+      .replace(/\n\n/g, '<br/><br/>')
+      .replace(/(?<!\n)\n(?!\n)/g, ' ') // single \n is just a space (standard LaTeX behavior)
       .replace(/\\newline/g, '<br/>')
       .replace(/\\\\/g, '<br/>')
       .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
       .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
       .replace(/\\underline\{([^}]+)\}/g, '<u>$1</u>')
+      .replace(/\\ul\{([^}]+)\}/g, '<u>$1</u>')
+      .replace(/\\hl\{([^}]+)\}/g, '<mark style="background:#fff3a3; padding:0 .15em; border-radius:2px;">$1</mark>')
       .replace(/\\text\{([^}]+)\}/g, '$1')
+      // \vert is a math command; in plain text (an option ending with "|") it would
+      // show up literally as "\vert" — render it as the vertical bar it stands for.
+      .replace(/\\vert\b\s?/g, '|')
+      // Ký tự LaTeX bị pandoc escape — hiện lại dạng thường (\% là phổ biến nhất)
+      .replace(/\\%/g, '%')
+      .replace(/\\#/g, '#')
+      .replace(/\\&/g, '&amp;')
+      .replace(/\\_/g, '_')
       .replace(/\\hspace\*?\{[^}]*\}/g, ' ')
       .replace(/\\vspace\*?\{[^}]*\}/g, '')
       .replace(/\\noindent/g, '')

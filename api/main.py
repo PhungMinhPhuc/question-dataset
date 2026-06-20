@@ -43,12 +43,15 @@ IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", "./storage")
 os.makedirs(IMG_STORAGE_PATH, exist_ok=True)
 app.mount("/static/images", NoCacheStaticFiles(directory=IMG_STORAGE_PATH), name="images")
 
+from routers import auth, questions, upload, classes, contests, export
+
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(questions.router)
 app.include_router(upload.router)
 app.include_router(classes.router)
 app.include_router(contests.router)
+app.include_router(export.router)
 
 
 @app.get("/")
@@ -69,4 +72,10 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=8000, 
+        reload=True,
+        reload_excludes=["*.docx", "*.tex", "*.zip", "*.xlsx", "*.pdf", "storage/*"]
+    )

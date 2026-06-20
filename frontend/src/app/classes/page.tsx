@@ -48,6 +48,17 @@ export default function ClassesPage() {
  } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Lỗi'); }
  };
 
+ const handleDeleteClass = async (e: React.MouseEvent, cls: Class) => {
+ e.preventDefault(); e.stopPropagation(); // không kích hoạt điều hướng của Link
+ setError(''); setSuccess('');
+ if (!confirm(`Xóa lớp "${cls.class_name}"?\nHọc sinh sẽ bị gỡ khỏi lớp và các đề thi của lớp sẽ chuyển thành không gán lớp (đề và kết quả vẫn được giữ). Không thể hoàn tác.`)) return;
+ try {
+  await api.deleteClass(cls.id);
+  setSuccess('Đã xóa lớp');
+  fetchClasses();
+ } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Lỗi xóa lớp'); }
+ };
+
  return (
  <div className="page-wrapper">
   <Sidebar />
@@ -82,9 +93,14 @@ export default function ClassesPage() {
     <div className="card" style={{ cursor: 'pointer', height: '100%' }}>
      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1rem' }}>
      <div style={{ width: 44, height: 44, background: 'rgba(79,70,229,0.08)', border: '1px solid rgba(79,70,229,0.15)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem' }}></div>
+     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace', background: 'var(--bg-elevated)', padding: '0.2rem 0.5rem', borderRadius: 6 }}>
       ID: {String(cls.public_id).slice(0,8)}...
      </span>
+     {user?.role === 'teacher' && (
+      <button className="btn btn-danger btn-sm" onClick={(e) => handleDeleteClass(e, cls)}>Xóa</button>
+     )}
+     </div>
      </div>
      <h3 style={{ marginBottom: '0.4rem' }}>{cls.class_name}</h3>
      {cls.description && <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1rem' }}>{cls.description}</p>}

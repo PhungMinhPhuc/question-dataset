@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Depends, Body
 from db import get_cursor
 from auth import get_current_teacher, get_current_user, optional_user
-from models import ContestCreateRequest, ContestSubmitRequest, StartContestRequest
+from models import ContestCreateRequest, ContestSubmitRequest, StartContestRequest, RandomContestRequest
 
 router = APIRouter(prefix="/contests", tags=["Contests"])
 
@@ -106,6 +106,83 @@ def create_contest(body: ContestCreateRequest, current_user: dict = Depends(get_
         conn.commit()
 
     return {"id": contest_id, "public_id": str(contest["public_id"]), "message": "Tạo đề thi thành công"}
+
+
+@router.post("/random")
+def create_random_contest(body: RandomContestRequest, current_user: dict = Depends(get_current_teacher)):
+    """Tự động bốc ngẫu nhiên `count` câu hỏi từ ngân hàng của giáo viên và tạo đề thi.
+
+    Phiên bản đầu (tạm): chỉ bốc các câu đơn (không phải 'st' chung giả thiết) để
+    tránh phải kéo theo câu con. Sau này có thể mở rộng theo ma trận đề thi.
+    """
+    if body.count < 1:
+        raise HTTPException(status_code=400, detail="Số câu phải lớn hơn 0")
+
+    with get_cursor() as (cur, conn):
+        conditions = [
+            "teacher_id = %s", "deleted_at IS NULL",
+            "parent_id IS NULL", "question_type <> 'st'",
+        ]
+        params = [current_user["user_id"]]
+        if body.subject:
+            conditions.append("subject = %s"); params.append(body.subject)
+        if body.grade:
+            conditions.append("grade = %s"); params.append(body.grade)
+        if body.question_type:
+            conditions.append("question_type = %s"); params.append(body.question_type)
+        if body.complexity:
+            conditions.append("complexity = %s"); params.append(body.complexity)
+        where = " AND ".join(conditions)
+
+        # Bốc ngẫu nhiên, rồi sắp xếp theo loại (mc → tf → sa → oe) cho gọn đề
+        cur.execute(
+            f"""
+            SELECT id, question_type
+            FROM questions
+            WHERE {where}
+            ORDER BY RANDOM()
+            LIMIT %s
+            """,
+            params + [body.count],
+        )
+        picked = cur.fetchall()
+        if not picked:
+            raise HTTPException(status_code=400, detail="Không có câu hỏi nào phù hợp để tạo đề")
+
+        type_order = {"mc": 1, "tf": 2, "sa": 3, "oe": 4}
+        picked = sorted(picked, key=lambda r: type_order.get(r["question_type"], 99))
+        question_ids = [r["id"] for r in picked]
+
+        cur.execute(
+            """
+            INSERT INTO contests (class_id, teacher_id, title, time_limit, scoring_config, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, public_id
+            """,
+            (
+                body.class_id, current_user["user_id"], body.title, body.time_limit,
+                json.dumps(body.scoring_config), body.status,
+            ),
+        )
+        contest = cur.fetchone()
+        contest_id = contest["id"]
+
+        for order, q_id in enumerate(question_ids, 1):
+            cur.execute(
+                """
+                INSERT INTO contests_questions (contest_id, question_id, original_order, point_weight)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (contest_id, q_id, order, 1.0),
+            )
+        conn.commit()
+
+    return {
+        "id": contest_id,
+        "public_id": str(contest["public_id"]),
+        "count": len(question_ids),
+        "message": f"Đã tạo đề thi ngẫu nhiên với {len(question_ids)} câu",
+    }
 
 
 @router.get("/{contest_id}")

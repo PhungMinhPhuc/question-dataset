@@ -67,7 +67,7 @@ export default function Combobox({ value, onChange, options, placeholder, classN
             setOpen(true);
           }}
           placeholder={placeholder}
-          style={{ width: '100%', paddingRight: '20px', textOverflow: 'ellipsis' }}
+          style={{ width: '100%', paddingRight: '20px', textOverflow: 'ellipsis', marginBottom: 0 }}
         />
         <div 
           onClick={() => setOpen(!open)}

@@ -22,6 +22,8 @@ def unescape_latex(text: str) -> str:
         (r'\textbackslash motcot', r'\motcot'),
         (r'\textbackslash haicot', r'\haicot'),
         (r'\textbackslash info', r'\info'),
+        (r'\textbackslash heva', r'\heva'),
+        (r'\textbackslash hoac', r'\hoac'),
     ]
 
     for old, new in replacements:
@@ -93,6 +95,9 @@ def unescape_pandoc_math(text: str) -> str:
     # {[} is pandoc's way of protecting [ from being parsed as an optional-arg opener;
     # strip it when it appears immediately before \left so the math renders correctly
     text = re.sub(r'\{\[\}\s*(?=\\left)', '', text)
+    # Any remaining {[} / {]} are pandoc-escaped literal brackets (e.g. [竹] in plain
+    # text) — restore them so they don't show up literally as "{[}竹{]}".
+    text = text.replace('{[}', '[').replace('{]}', ']')
     # Two adjacent inline-math blocks like $A$$B$ are unescaped from \$A\$\$B\$.
     # $$ in the middle of a line means display-math in LaTeX/KaTeX, not two inlines.
     # Insert a space to separate them: $A$ $B$.

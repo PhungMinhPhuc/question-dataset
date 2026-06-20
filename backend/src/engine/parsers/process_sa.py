@@ -1,7 +1,7 @@
 import re
-from get_bracket_content import get_bracket_content
-from extract_loigiai import extract_loigiai
-from parse_visuals import *
+from utils.get_bracket_content import get_bracket_content
+from utils.extract_loigiai import extract_loigiai
+from utils.parse_visuals import *
 
 def process_sa_block(block, teacher_id, question_public_id, subject, grade, parent_id, chapter, lesson, complexity, is_shufflable, source_file_path, target_img_dir):
 
@@ -42,7 +42,7 @@ def process_sa_block(block, teacher_id, question_public_id, subject, grade, pare
             # Ghép ảnh từ arg2 vào content
             if arg2_content.strip():
                 content += "\n" + arg2_content.strip()
-            shortans_pos = block.find(r'\shortans{')
+            shortans_pos = block.find(r'\shortans')
             if shortans_pos != -1:
                 brace_start = block.find("{", shortans_pos)
                 if brace_start != -1:
@@ -52,7 +52,7 @@ def process_sa_block(block, teacher_id, question_public_id, subject, grade, pare
         # Trường hợp NORMAL (bao gồm cả center vì ảnh đã được inline)
         parts = re.split(r'\\shortans', block, maxsplit=1)
         content = parts[0].strip()
-        shortans_pos = block.find(r'\shortans{')
+        shortans_pos = block.find(r'\shortans')
         if shortans_pos != -1:
             brace_start = block.find("{", shortans_pos)
             if brace_start != -1:

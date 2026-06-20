@@ -1,6 +1,6 @@
 import re
-from get_bracket_content import get_bracket_content
-from parse_visuals import *
+from utils.get_bracket_content import get_bracket_content
+from utils.parse_visuals import *
 
 # Xử lý nội dung dùng chung cho câu hỏi chùm
 def process_stimulus_block(block, teacher_id, question_public_id, subject, grade, parent_id, chapter, lesson, complexity, is_shufflable, source_file_path, target_img_dir):

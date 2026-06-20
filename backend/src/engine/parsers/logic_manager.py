@@ -3,13 +3,14 @@ import json
 import uuid
 import re
 from datetime import datetime
-from process_mc import process_mc_block
-from process_tf import process_tf_block
-from process_sa import process_sa_block
-from process_oe import process_oe_block
-from process_stimulus import process_stimulus_block
-from get_bracket_content import get_bracket_content
-from curriculum import DATA
+from parsers.process_mc import process_mc_block
+from parsers.process_tf import process_tf_block
+from parsers.process_sa import process_sa_block
+from parsers.process_oe import process_oe_block
+from parsers.process_stimulus import process_stimulus_block
+from utils.get_bracket_content import get_bracket_content
+from data.curriculum import DATA
+from utils.utils import replace_math_macros
 
 # Nhận diện loại câu hỏi và gọi hàm xử lý tương ứng
 def dispatch_block(block, teacher_id, question_public_id, parent_id, subject, grade, metadata, source_path, img_dir):
@@ -60,6 +61,9 @@ def run_parser(file_path, teacher_id, subject, grade, chapter, lesson, complexit
     # Fix: Chỉ xóa % khi không phải \% (escape) và không phải \d% (ví dụ: 50%)
     # Lookbehind: không xóa nếu đứng trước là \ (tức là \%) hoặc là chữ số
     content = re.sub(r'(?<!\\)(?<!\d)(?<!\\\\)%[^\n]*', '', content)
+
+    # Thay thế các lệnh \heva và \hoac
+    content = replace_math_macros(content)
 
     # Xử lý các khối câu hỏi \begin{ex}
     blocks = re.findall(r'\\begin\{ex\}(.*?)\\end\{ex\}', content, re.DOTALL)

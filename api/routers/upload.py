@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import uuid
 import shutil
 import zipfile
@@ -10,7 +11,7 @@ import threading
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPException, Depends
 from db import get_cursor
 from auth import get_current_teacher
-from models import UploadConfirmRequest
+from models import UploadConfirmRequest, UploadAsContestRequest
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -47,8 +48,8 @@ def _run_job(job_id: str, file_path: str, job_dir: str,
     try:
         # Imports are inside the try so a missing module sets status="error"
         # instead of silently killing the thread and leaving status="processing".
-        from logic_manager import run_parser
-        from parse_docx import convert_docx_to_tex
+        from parsers.logic_manager import run_parser
+        from parsers.parse_docx import convert_docx_to_tex
 
         fname = os.path.basename(file_path)
 
@@ -220,76 +221,131 @@ async def get_job_status(
 
 # ── Confirm (unchanged) ───────────────────────────────────────────────────────
 
+def _persist_questions(cur, data, teacher_id, grade, subject) -> list[int]:
+    """Insert reviewed questions (and their images/details) into the DB.
+
+    Returns the new question ids in the order they appear in `data` (parents and
+    children alike) so a contest can be built from them. Must be called inside an
+    open cursor/transaction; the caller commits.
+    """
+    id_map: dict[str, int] = {}
+    created_ids: list[int] = []
+
+    for item in data:
+        q = item["table_question"]
+        q["teacher_id"] = teacher_id
+        q["grade"] = grade
+        q["subject"] = subject
+
+        internal_parent_id = id_map.get(q.get("parent_id")) if q.get("parent_id") else None
+
+        cur.execute(
+            """
+            INSERT INTO questions (
+                teacher_id, public_id, subject, grade, parent_id,
+                question_type, layout_type, content, solution,
+                chapter, lesson, complexity, is_shufflable
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+            """,
+            (
+                q["teacher_id"], q.get("public_id") or str(uuid.uuid4()),
+                q["subject"], q["grade"], internal_parent_id,
+                q.get("question_type"), q.get("layout_type"),
+                q.get("content"), q.get("solution"),
+                q.get("chapter", ""), q.get("lesson", ""),
+                q.get("complexity", 1), q.get("is_shufflable", True),
+            ),
+        )
+        new_id = cur.fetchone()["id"]
+        created_ids.append(new_id)
+        if q.get("public_id"):
+            id_map[q["public_id"]] = new_id
+
+        for img in item.get("table_images", []):
+            cur.execute(
+                "INSERT INTO q_images (question_id, storage_path, img_type, img_scale, raw_code) VALUES (%s,%s,%s,%s,%s)",
+                (new_id, img.get("storage_path"), img.get("img_type"),
+                 img.get("img_scale"), img.get("raw_code")),
+            )
+
+        details = item.get("table_details", {})
+        target = details.get("target_table")
+        records = details.get("records", [])
+
+        if target == "q_choice_details":
+            for idx, rec in enumerate(records):
+                cur.execute(
+                    "INSERT INTO q_choice_details (question_id, content, is_correct, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s)",
+                    (new_id, rec["content"], rec.get("is_correct", False),
+                     rec.get("order_index", idx), rec.get("is_shufflable", True)),
+                )
+        elif target == "q_truefalse_details":
+            for idx, rec in enumerate(records):
+                cur.execute(
+                    "INSERT INTO q_truefalse_details (question_id, content, is_correct, explaination, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (new_id, rec["content"], rec.get("is_correct", False),
+                     rec.get("explaination") or rec.get("explanation"),
+                     rec.get("order_index", idx), rec.get("is_shufflable", True)),
+                )
+        elif target == "q_shortans_details":
+            for rec in records:
+                cur.execute(
+                    "INSERT INTO q_shortans_details (question_id, content) VALUES (%s,%s)",
+                    (new_id, rec["content"]),
+                )
+
+    return created_ids
+
+
 @router.post("/confirm")
 def confirm_upload(body: UploadConfirmRequest,
                    current_user: dict = Depends(get_current_teacher)):
     """Receive reviewed JSON and persist to database."""
-    id_map: dict[str, int] = {}
-
     with get_cursor() as (cur, conn):
-        for item in body.data:
-            q = item["table_question"]
-            q["teacher_id"] = current_user["user_id"]
-            q["grade"] = body.grade
-            q["subject"] = body.subject
-
-            internal_parent_id = id_map.get(q.get("parent_id")) if q.get("parent_id") else None
-
-            cur.execute(
-                """
-                INSERT INTO questions (
-                    teacher_id, public_id, subject, grade, parent_id,
-                    question_type, layout_type, content, solution,
-                    chapter, lesson, complexity, is_shufflable
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (
-                    q["teacher_id"], q.get("public_id") or str(uuid.uuid4()),
-                    q["subject"], q["grade"], internal_parent_id,
-                    q.get("question_type"), q.get("layout_type"),
-                    q.get("content"), q.get("solution"),
-                    q.get("chapter", ""), q.get("lesson", ""),
-                    q.get("complexity", 1), q.get("is_shufflable", True),
-                ),
-            )
-            new_id = cur.fetchone()["id"]
-            if q.get("public_id"):
-                id_map[q["public_id"]] = new_id
-
-            for img in item.get("table_images", []):
-                cur.execute(
-                    "INSERT INTO q_images (question_id, storage_path, img_type, img_scale, raw_code) VALUES (%s,%s,%s,%s,%s)",
-                    (new_id, img.get("storage_path"), img.get("img_type"),
-                     img.get("img_scale"), img.get("raw_code")),
-                )
-
-            details = item.get("table_details", {})
-            target = details.get("target_table")
-            records = details.get("records", [])
-
-            if target == "q_choice_details":
-                for idx, rec in enumerate(records):
-                    cur.execute(
-                        "INSERT INTO q_choice_details (question_id, content, is_correct, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s)",
-                        (new_id, rec["content"], rec.get("is_correct", False),
-                         rec.get("order_index", idx), rec.get("is_shufflable", True)),
-                    )
-            elif target == "q_truefalse_details":
-                for idx, rec in enumerate(records):
-                    cur.execute(
-                        "INSERT INTO q_truefalse_details (question_id, content, is_correct, explaination, order_index, is_shufflable) VALUES (%s,%s,%s,%s,%s,%s)",
-                        (new_id, rec["content"], rec.get("is_correct", False),
-                         rec.get("explaination") or rec.get("explanation"),
-                         rec.get("order_index", idx), rec.get("is_shufflable", True)),
-                    )
-            elif target == "q_shortans_details":
-                for rec in records:
-                    cur.execute(
-                        "INSERT INTO q_shortans_details (question_id, content) VALUES (%s,%s)",
-                        (new_id, rec["content"]),
-                    )
-
+        ids = _persist_questions(cur, body.data, current_user["user_id"], body.grade, body.subject)
         conn.commit()
 
-    return {"message": f"Đã lưu {len(body.data)} câu hỏi vào database"}
+    return {"message": f"Đã lưu {len(body.data)} câu hỏi vào database", "ids": ids}
+
+
+@router.post("/confirm-as-contest")
+def confirm_as_contest(body: UploadAsContestRequest,
+                       current_user: dict = Depends(get_current_teacher)):
+    """Persist reviewed questions to the bank AND create a contest from them.
+
+    Per the current decision the imported questions are always saved to the bank
+    (no hidden/exam-only flag yet); the contest simply references them in order.
+    """
+    with get_cursor() as (cur, conn):
+        ids = _persist_questions(cur, body.data, current_user["user_id"], body.grade, body.subject)
+        if not ids:
+            raise HTTPException(400, "Không có câu hỏi nào để tạo đề")
+
+        cur.execute(
+            """
+            INSERT INTO contests (class_id, teacher_id, title, time_limit, scoring_config, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, public_id
+            """,
+            (
+                body.class_id, current_user["user_id"], body.title, body.time_limit,
+                json.dumps(body.scoring_config or {}), body.status,
+            ),
+        )
+        contest = cur.fetchone()
+        contest_id = contest["id"]
+
+        for order, q_id in enumerate(ids, 1):
+            cur.execute(
+                "INSERT INTO contests_questions (contest_id, question_id, original_order, point_weight) VALUES (%s,%s,%s,%s)",
+                (contest_id, q_id, order, 1.0),
+            )
+        conn.commit()
+
+    return {
+        "contest_id": contest_id,
+        "public_id": str(contest["public_id"]),
+        "saved": len(ids),
+        "message": f"Đã lưu {len(ids)} câu và tạo đề thi",
+    }

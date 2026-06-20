@@ -30,6 +30,10 @@ export default function NewContestPage() {
  const [error, setError] = useState('');
  const [success, setSuccess] = useState('');
 
+ // Tạo đề ngẫu nhiên theo số câu
+ const [randomCount, setRandomCount] = useState(10);
+ const [randomLoading, setRandomLoading] = useState(false);
+
  useEffect(() => {
  if (!isLoading && (!user || user.role !== 'teacher')) router.replace('/dashboard');
  }, [user, isLoading, router]);
@@ -143,6 +147,23 @@ export default function NewContestPage() {
  } finally { setLoading(false); }
  };
 
+ const handleRandom = async () => {
+  if (!title.trim()) { setError('Vui lòng nhập tên đề thi trước khi tạo ngẫu nhiên'); return; }
+  if (randomCount < 1) { setError('Số câu ngẫu nhiên phải lớn hơn 0'); return; }
+  setRandomLoading(true); setError('');
+  try {
+   const res = await api.createRandomContest({
+    class_id: classId || null, title, time_limit: timeLimit,
+    scoring_config: { ...scores }, count: randomCount, status,
+    question_type: qType || undefined,
+   });
+   setSuccess(`Đã tạo đề ngẫu nhiên (${res.count} câu)! ID: ${res.id}`);
+   setTimeout(() => router.push('/contests'), 1500);
+  } catch (err: unknown) {
+   setError(err instanceof Error ? err.message : 'Lỗi tạo đề ngẫu nhiên');
+  } finally { setRandomLoading(false); }
+ };
+
  const TYPE_LABELS: Record<string, string> = { mc: 'TN', tf: 'ĐS', sa: 'TLN', oe: 'TL', st: 'Chung giả thiết' };
  
  const typeCounts: Record<string, number> = { mc: 0, tf: 0, sa: 0, oe: 0 };
@@ -237,6 +258,22 @@ export default function NewContestPage() {
     {loading ? <><span className="spinner" /> Đang tạo...</> : ' Tạo đề thi'}
     </button>
    </form>
+
+   <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px dashed var(--border)' }}>
+    <label className="form-label" style={{ marginBottom: '0.5rem' }}>Tạo đề ngẫu nhiên</label>
+    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+     Tự động bốc ngẫu nhiên câu hỏi từ ngân hàng theo số câu (dùng tên đề, thời gian, thang điểm, lớp & bộ lọc loại ở trên).
+    </div>
+    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+     <input className="input" type="number" min={1} max={200} value={randomCount}
+       onChange={e => setRandomCount(+e.target.value)} style={{ width: '90px' }} />
+     <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>câu</span>
+     <button type="button" className="btn btn-secondary" style={{ flex: 1 }}
+       onClick={handleRandom} disabled={randomLoading}>
+      {randomLoading ? <><span className="spinner" /> Đang tạo...</> : 'Tạo đề ngẫu nhiên'}
+     </button>
+    </div>
+   </div>
    </div>
 
    {/* Right: Question bank */}

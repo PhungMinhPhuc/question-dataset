@@ -49,6 +49,7 @@ class QuestionDetailUpdate(BaseModel):
     id: int
     content: Optional[str] = None
     is_correct: Optional[bool] = None
+    explaination: Optional[str] = None  # lời giải cho từng ý (câu Đúng/Sai)
 
 class QuestionUpdateRequest(BaseModel):
     subject: Optional[str] = None
@@ -68,6 +69,17 @@ class UploadConfirmRequest(BaseModel):
     subject: str
     grade: int
     data: List[Any]  # danh sách parsed question dicts
+
+class UploadAsContestRequest(BaseModel):
+    teacher_id: int
+    subject: str
+    grade: int
+    data: List[Any]  # parsed question dicts để lưu ngân hàng + tạo đề
+    title: str
+    time_limit: int = 45  # phút
+    scoring_config: dict = {}
+    status: str = "inactive"
+    class_id: Optional[int] = None
 
 
 # ── Classes ──────────────────────────────────────────────────────────────────
@@ -92,6 +104,19 @@ class ContestCreateRequest(BaseModel):
     scoring_config: dict
     question_ids: List[int]
     status: str = "inactive"
+
+class RandomContestRequest(BaseModel):
+    class_id: Optional[int] = None
+    title: str
+    time_limit: int  # phút
+    scoring_config: dict
+    count: int  # số câu muốn bốc ngẫu nhiên
+    status: str = "inactive"
+    # Bộ lọc tùy chọn để giới hạn nguồn bốc câu
+    subject: Optional[str] = None
+    grade: Optional[int] = None
+    question_type: Optional[str] = None  # mc, tf, sa, oe
+    complexity: Optional[int] = None
 
 class ContestSubmitRequest(BaseModel):
     contest_result_id: int

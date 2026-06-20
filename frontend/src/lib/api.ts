@@ -53,6 +53,9 @@ export const api = {
   deleteQuestion: (id: number) =>
     apiFetch(`/questions/${id}`, { method: 'DELETE' }),
 
+  deleteAllQuestions: () =>
+    apiFetch('/questions/all', { method: 'DELETE' }),
+
   getSubjects: () => apiFetch('/questions/subjects/list'),
 
   getMetadataFilters: () => apiFetch('/questions/metadata/filters'),
@@ -76,6 +79,9 @@ export const api = {
   confirmUpload: (data: object) =>
     apiFetch('/upload/confirm', { method: 'POST', body: JSON.stringify(data) }),
 
+  confirmUploadAsContest: (data: object) =>
+    apiFetch('/upload/confirm-as-contest', { method: 'POST', body: JSON.stringify(data) }),
+
   // Classes
   getClasses: () => apiFetch('/classes'),
 
@@ -83,6 +89,9 @@ export const api = {
     apiFetch('/classes', { method: 'POST', body: JSON.stringify(data) }),
 
   getClass: (id: number) => apiFetch(`/classes/${id}`),
+
+  deleteClass: (id: number) =>
+    apiFetch(`/classes/${id}`, { method: 'DELETE' }),
 
   joinClass: (classPublicId: string) =>
     apiFetch('/classes/join', { method: 'POST', body: JSON.stringify({ class_public_id: classPublicId }) }),
@@ -98,6 +107,9 @@ export const api = {
 
   createContest: (data: object) =>
     apiFetch('/contests', { method: 'POST', body: JSON.stringify(data) }),
+
+  createRandomContest: (data: object) =>
+    apiFetch('/contests/random', { method: 'POST', body: JSON.stringify(data) }),
 
   getContest: (id: number) => apiFetch(`/contests/${id}`),
 
@@ -115,6 +127,40 @@ export const api = {
 
   updateContestStatus: (id: number, status: string) =>
     apiFetch(`/contests/${id}/status?status=${status}`, { method: 'PATCH' }),
+
+  exportContest: async (id: number, data: object) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const res = await fetch(`${API_URL}/export/exam/${id}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || 'Export failed');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // Lấy filename từ header Content-Disposition nếu có
+    const contentDisposition = res.headers.get('Content-Disposition');
+    let filename = `Export_Contest_${id}.zip`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+      if (filenameMatch && filenameMatch.length === 2) {
+        filename = filenameMatch[1];
+      }
+    }
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 export default api;

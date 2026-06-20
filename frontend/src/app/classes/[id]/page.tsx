@@ -173,9 +173,34 @@ export default function ClassDetailPage() {
               <p className="page-sub">Giáo viên: {classData.teacher_name}</p>
             )}
           </div>
-          <button className="btn btn-secondary" onClick={() => router.push("/classes")}>
-            Quay lại
-          </button>
+          <div style={{ display: "flex", gap: "0.75rem" }}>
+            {user?.role === "teacher" &&
+              classData &&
+              user?.user_id === classData.teacher_id && (
+                <button
+                  className="btn btn-danger"
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `Xóa lớp "${classData.class_name}"?\nHọc sinh sẽ bị gỡ khỏi lớp và các đề thi của lớp sẽ chuyển thành không gán lớp (đề và kết quả vẫn được giữ). Không thể hoàn tác.`,
+                      )
+                    )
+                      return;
+                    try {
+                      await api.deleteClass(classData.id);
+                      router.push("/classes");
+                    } catch (e: unknown) {
+                      setError(e instanceof Error ? e.message : "Lỗi xóa lớp");
+                    }
+                  }}
+                >
+                  Xóa lớp
+                </button>
+              )}
+            <button className="btn btn-secondary" onClick={() => router.push("/classes")}>
+              Quay lại
+            </button>
+          </div>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}

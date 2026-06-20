@@ -1,4 +1,94 @@
 import re
+from utils.get_bracket_content import get_bracket_content
+
+
+def _flatten_formatting(s):
+    r"""Strip every formatting wrapper (\textbf, \textit, \emph, \ul, \underline,
+    \hl, \textcolor{c}{...}) brace-aware and recursively, leaving plain text.
+
+    Used only to test whether an emphasised span is really an option label like
+    "B." — Word/pandoc can nest these arbitrarily (e.g. ``\textbf{\ul{B}.}`` where
+    the letter is underlined+bold and the dot sits between the layers), which a
+    single fixed regex cannot peel.
+    """
+    simple = ('\\textbf', '\\textit', '\\emph', '\\underline', '\\ul', '\\hl')
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        matched = False
+        # \textcolor{color}{content} — drop the colour arg, flatten the content
+        if s.startswith('\\textcolor', i):
+            j = i + len('\\textcolor')
+            if j < n and s[j] == '{':
+                _, e1 = get_bracket_content(s, j)
+                if e1 != -1 and e1 + 1 < n and s[e1 + 1] == '{':
+                    inner, e2 = get_bracket_content(s, e1 + 1)
+                    if e2 != -1:
+                        out.append(_flatten_formatting(inner))
+                        i = e2 + 1
+                        matched = True
+        if not matched:
+            for cmd in simple:
+                if s.startswith(cmd, i) and i + len(cmd) < n and s[i + len(cmd)] == '{':
+                    inner, e = get_bracket_content(s, i + len(cmd))
+                    if e != -1:
+                        out.append(_flatten_formatting(inner))
+                        i = e + 1
+                        matched = True
+                        break
+        if not matched:
+            out.append(s[i])
+            i += 1
+    return ''.join(out)
+
+
+def _mark_emphasis_answers(text):
+    r"""Brace-aware handling of \hl{...}, \ul{...} and \underline{...}.
+
+    For each wrapper, inspect its inner content (with any \textbf{} removed):
+      * if it begins with an option label "A." … "D.", emit ``__TRUE__<letter>. <rest>``
+        — the emphasis was marking the correct answer, so the wrapper is consumed;
+      * otherwise keep it as display emphasis (``\ul`` is normalised to ``\underline``)
+        so an underlined word in the stem or a highlighted phrase survives untouched.
+
+    Because it walks matched braces instead of matching fixed regex shapes, nestings
+    like ``\hl{\textbf{B.} 集まって}`` or ``\textbf{\hl{B. ...}}`` all work, and the
+    inner \textbf{B.} can never be rewritten to __OPT__ mid-wrapper (which used to
+    split the braces and leak ``\hl{} {content}`` into the previous option).
+    """
+    display = {'\\hl': '\\hl', '\\underline': '\\underline', '\\ul': '\\underline'}
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        cmd = None
+        for c in ('\\underline', '\\hl', '\\ul'):  # match longest first
+            if text.startswith(c, i) and i + len(c) < n and text[i + len(c)] == '{':
+                cmd = c
+                break
+        if cmd is None:
+            out.append(text[i])
+            i += 1
+            continue
+        inner, end = get_bracket_content(text, i + len(cmd))
+        if end == -1:
+            out.append(text[i])
+            i += 1
+            continue
+        inner = _mark_emphasis_answers(inner)  # recurse into nested wrappers
+        # Fully de-format the inner text (brace-aware) to test for a label; handles
+        # deep nestings like \textbf{\ul{B}.} that a single regex can't peel.
+        flat = _flatten_formatting(inner).strip()
+        m = re.match(r'([A-D])\s*\.\s*(.*)$', flat, re.DOTALL)
+        if m:
+            letter, rest = m.group(1), m.group(2).strip()
+            out.append(f'__TRUE__{letter}. {rest}' if rest else f'__TRUE__{letter}.')
+        else:
+            out.append(display[cmd] + '{' + inner + '}')
+        i = end + 1
+    return ''.join(out)
+
 
 def strip_pandocbounded(text):
     # \pandocbounded{\includegraphics[...]{...}} -> \includegraphics[...]{...}
@@ -28,24 +118,14 @@ def process_standard_to_btpro(tex_content):
     tex_content = re.sub(r'\\textbf\{\\textcolor\{[^}]+\}\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
     tex_content = re.sub(r'\\textcolor\{[^}]+\}\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
 
-    # 2. Handle \ul{...} and \underline{...} (Underline)
-    tex_content = re.sub(r'\\textbf\{\\ul\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
-    tex_content = re.sub(r'\\ul\{\\textbf\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
-    tex_content = re.sub(r'\\textbf\{\\underline\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
-    tex_content = re.sub(r'\\underline\{\\textbf\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
-    tex_content = re.sub(r'\\ul\{([A-D])\.\s*(' + _inner + r')\}', r'__TRUE__\1. \2', tex_content)
-    tex_content = re.sub(r'\\underline\{([A-D])\.\s*(' + _inner + r')\}', r'__TRUE__\1. \2', tex_content)
-
-    tex_content = re.sub(r'\\textbf\{\\ul\{([A-D])\.\}\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\ul\{\\textbf\{([A-D])\.\}\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\textbf\{\\underline\{([A-D])\.\}\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\underline\{\\textbf\{([A-D])\.\}\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\textbf\{\\ul\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\ul\{\\textbf\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\textbf\{\\underline\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\underline\{\\textbf\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\ul\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
-    tex_content = re.sub(r'\\underline\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
+    # 2. Handle \ul / \underline / \hl with a brace-aware pass. A wrapper whose inner
+    # text (ignoring \textbf) starts with an option label "A." … "D." marks the correct
+    # answer (→ __TRUE__); anything else (an underlined word in the stem, a highlighted
+    # phrase, or option content highlighted without a label) is kept for display. This
+    # replaces a fragile zoo of fixed-shape regexes that broke on nestings such as
+    # \hl{\textbf{B.} content} (the inner \textbf{B.} used to be rewritten to __OPT__
+    # *inside* the \hl{…}, splitting its braces and leaking "\hl{} {content}").
+    tex_content = _mark_emphasis_answers(tex_content)
 
     # Normal options
     tex_content = re.sub(r'\\textbf\{([A-D])\.\s*(' + _inner + r')\}', r'__OPT__\1. \2', tex_content)
@@ -55,8 +135,15 @@ def process_standard_to_btpro(tex_content):
     # True/False options clean up (a), b), c), d))
     tex_content = re.sub(r'\\textbf\{([a-d])\)\}', r'__TF__\1)', tex_content)
     
-    # Split by questions
-    questions = re.split(r'\\textbf\{Câu\s+\d+\}[\.:]?|\\textbf\{Câu\s+\d+[\.:]?\}', tex_content, flags=re.IGNORECASE)
+    # Split by questions. Accept both the bold form (\textbf{Câu 1.}) and the plain
+    # form (a line starting with "Câu 1." / "Câu 1:") so files that don't bold the
+    # question label are still parsed instead of yielding 0 questions.
+    questions = re.split(
+        r'\\textbf\{Câu\s+\d+[\.:]?\}[\.:]?'   # bold: \textbf{Câu 1} / \textbf{Câu 1.} / {Câu 1:}
+        r'|(?m:^[ \t]*Câu\s+\d+[\.:])',          # plain: line begins with Câu 1. / Câu 1:
+        tex_content,
+        flags=re.IGNORECASE,
+    )
     
     final_tex = ""
     for q_content in questions[1:]:
@@ -93,10 +180,20 @@ def process_standard_to_btpro(tex_content):
         main_part = re.sub(r'\\textbf\{((?:[^{}\\]|\\.)*)\}', r'\1', main_part)
         solution_part = re.sub(r'\\textbf\{((?:[^{}\\]|\\.)*)\}', r'\1', solution_part)
         
-        # Strip leftover \ul{} and \underline{}
-        main_part = re.sub(r'\\(?:ul|underline)\{((?:[^{}\\]|\\.)*)\}', r'\1', main_part)
-        solution_part = re.sub(r'\\(?:ul|underline)\{((?:[^{}\\]|\\.)*)\}', r'\1', solution_part)
-        
+        # Keep emphasis that is NOT an answer marker so the stem matches the original
+        # exam (e.g. an underlined word in a Japanese reading question, or a
+        # highlighted phrase). Answer-marker underline/highlight on A./B./C./D. labels
+        # was already turned into __TRUE__ above, so whatever \ul/\underline/\hl remains
+        # is genuine content. Rename \ul → \underline because the frontend renders
+        # \underline as <u> and \hl as <mark>; leave \underline / \hl untouched.
+        main_part = main_part.replace(r'\ul{', r'\underline{')
+        solution_part = solution_part.replace(r'\ul{', r'\underline{')
+
+        # Drop empty emphasis wrappers (e.g. \hl{} left when a highlighted run held
+        # only a space) — otherwise the frontend would print them literally.
+        main_part = re.sub(r'\\(?:hl|underline)\{\s*\}', '', main_part)
+        solution_part = re.sub(r'\\(?:hl|underline)\{\s*\}', '', solution_part)
+
         # Strip leftover \textcolor{...}{}
         main_part = re.sub(r'\\textcolor\{[^}]+\}\{((?:[^{}\\]|\\.)*)\}', r'\1', main_part)
         solution_part = re.sub(r'\\textcolor\{[^}]+\}\{((?:[^{}\\]|\\.)*)\}', r'\1', solution_part)
@@ -129,24 +226,38 @@ def process_standard_to_btpro(tex_content):
             question_text = opts_split[0].strip()
             
             options_dict = {}
+            correct_set = set()
             i = 1
             while i < len(opts_split) - 1:
                 letter = opts_split[i].lower()
                 content = opts_split[i+1].strip() if i+1 < len(opts_split) else ""
+                # A highlighted/underlined/coloured statement is the one marked Đúng
+                # (True); the rest stay Sai (False). Unwrap the emphasis for clean display.
+                if re.search(r'\\(?:hl|underline|ul)\{', content) or re.search(r'\\textcolor\{', content):
+                    correct_set.add(letter)
+                    content = re.sub(r'\\(?:hl|underline|ul)\{((?:[^{}\\]|\\.)*)\}', r'\1', content)
+                    content = re.sub(r'\\textcolor\{[^}]+\}\{((?:[^{}\\]|\\.)*)\}', r'\1', content)
+                    content = content.strip()
                 options_dict[letter] = content
                 i += 2
-                
+
             final_tex += f"\\begin{{ex}}\n{question_text}\n\\choiceTF\n"
             for letter in ['a', 'b', 'c', 'd']:
                 if letter in options_dict:
-                    # Mặc định true/false sẽ không biết đáp án từ đề standard nếu ko gạch chân
-                    # Cứ điền tạm vào
-                    final_tex += f"{{{options_dict[letter]}}}\n"
+                    # Highlight/gạch chân mệnh đề → \True (Đúng); còn lại để trống (Sai).
+                    prefix = "\\True " if letter in correct_set else ""
+                    final_tex += f"{{{prefix}{options_dict[letter]}}}\n"
                 else:
                     final_tex += "{}\n"
 
         else:
             # Multiple Choice (Default)
+            # Fallback: nếu phương án không bôi đậm thì các nhãn "A.".."D." chưa được
+            # đánh dấu __OPT__. Nhận diện nhãn dù ở ĐẦU DÒNG hay GIỮA DÒNG (cả 4 đáp án
+            # nằm chung một dòng) — miễn là theo sau là khoảng trắng. Nhãn đã thành
+            # __OPT__/__TRUE__ đứng sau '_' nên (?<![\w_]) bỏ qua; chữ giữa từ (vd "AB.")
+            # cũng bị loại vì ký tự trước là chữ.
+            main_part = re.sub(r'(?<![\w_])([A-D])\.(?=\s)', r'__OPT__\1.', main_part)
             opts_split = re.split(r'__(TRUE|OPT)__([A-D])\.', main_part)
             question_text = opts_split[0].strip()
             
@@ -158,6 +269,15 @@ def process_standard_to_btpro(tex_content):
                 is_true = (opts_split[i] == 'TRUE')
                 letter = opts_split[i+1].upper()
                 content = opts_split[i+2].strip() if i+2 < len(opts_split) else ""
+                # An option whose CONTENT (not just its label) is highlighted/underlined/
+                # coloured is the marked answer too — e.g. "\textbf{D.} \hl{以下}", where
+                # the emphasis sits after the label. Flag it correct, then unwrap the
+                # emphasis so the stored option text is clean.
+                if re.search(r'\\(?:hl|underline|ul)\{', content) or re.search(r'\\textcolor\{', content):
+                    is_true = True
+                    content = re.sub(r'\\(?:hl|underline|ul)\{((?:[^{}\\]|\\.)*)\}', r'\1', content)
+                    content = re.sub(r'\\textcolor\{[^}]+\}\{((?:[^{}\\]|\\.)*)\}', r'\1', content)
+                    content = content.strip()
                 options_dict[letter] = content
                 if is_true:
                     correct_ans = letter

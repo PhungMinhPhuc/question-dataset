@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import Sidebar from "@/components/Sidebar";
 import LatexRenderer from "@/components/LatexRenderer";
+import AdaptiveOptionGrid from "@/components/AdaptiveOptionGrid";
 import Combobox from "@/components/Combobox";
 import { QuestionEditor, QuestionDetail } from "@/components/QuestionEditor";
 import api from "@/lib/api";
@@ -70,6 +71,7 @@ export default function UploadPage() {
           id: i,
           content: r.content,
           is_correct: r.is_correct,
+          explaination: r.explaination ?? r.explanation,
         })) || [],
     };
   };
@@ -92,6 +94,7 @@ export default function UploadPage() {
               qData.details?.map((d: any) => ({
                 content: d.content,
                 is_correct: d.is_correct,
+                explaination: d.explaination,
               })) || [],
           }
         : oldItem.table_details,
@@ -117,7 +120,12 @@ export default function UploadPage() {
   const [subject, setSubject] = useState("Toán");
   const [grade, setGrade] = useState("12");
   const [chapter, setChapter] = useState("");
+  const [lesson, setLesson] = useState("");
   const [complexity, setComplexity] = useState(1);
+
+  // Modal nhập tên đề thi khi "Lưu & tạo đề thi"
+  const [showContestModal, setShowContestModal] = useState(false);
+  const [contestTitle, setContestTitle] = useState("");
 
   useEffect(() => {
     if (!isLoading && !user) router.replace("/");
@@ -144,6 +152,10 @@ export default function UploadPage() {
             subject
           ]?.[grade] || {},
         )
+      : [];
+  const lessonList: string[] =
+    subject && grade && chapter
+      ? ((subjects as any)?.[subject]?.[grade]?.[chapter] as string[]) || []
       : [];
 
   const handleDrop = (e: React.DragEvent) => {
@@ -187,6 +199,17 @@ export default function UploadPage() {
     });
   };
 
+  // Đồng bộ 1 trường (chương/bài/mức độ/khối) cho TẤT CẢ câu trong preview.
+  const applyToAll = (key: string, val: unknown) => {
+    setPreview((prev) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next.forEach((it: any) => {
+        it.table_question[key] = val;
+      });
+      return next;
+    });
+  };
+
   const removeItem = (idx: number) =>
     setPreview((prev) => prev.filter((_, i) => i !== idx));
 
@@ -220,6 +243,46 @@ export default function UploadPage() {
     }
   };
 
+  // Mở hộp nhập tên đề (modal) trước khi lưu + tạo đề thi.
+  const handleConfirmAsContest = () => {
+    if (!user) return;
+    const defaultTitle =
+      (file?.name?.replace(/\.[^.]+$/, "") || "Đề thi import") +
+      " - " +
+      new Date().toLocaleDateString("vi-VN");
+    setContestTitle(defaultTitle);
+    setShowContestModal(true);
+  };
+
+  // Lưu các câu vừa import vào ngân hàng RỒI tạo luôn thành 1 đề thi.
+  const doCreateContest = async () => {
+    if (!user) return;
+    const title = contestTitle.trim() || "Đề thi import";
+    setShowContestModal(false);
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.confirmUploadAsContest({
+        teacher_id: user.user_id,
+        subject,
+        grade: parseInt(grade),
+        data: preview,
+        title,
+        time_limit: 45,
+        scoring_config: { mc: 0.25, tf: 1.0, sa: 0.25, oe: 2.0 },
+        status: "inactive",
+      });
+      setPreview([]);
+      setFile(null);
+      setSuccess(`Đã lưu ${res.saved} câu và tạo đề thi! Đang chuyển...`);
+      setTimeout(() => router.push(`/contests/${res.contest_id}`), 1200);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Lỗi tạo đề thi");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="page-wrapper">
       <Sidebar />
@@ -237,13 +300,7 @@ export default function UploadPage() {
         {success && <div className="alert alert-success">{success}</div>}
 
         {preview.length === 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "1.5rem",
-            }}
-          >
+          <div style={{ maxWidth: 640, margin: "0 auto" }}>
             {/* Upload zone */}
             <div>
               <div
@@ -282,93 +339,30 @@ export default function UploadPage() {
               />
             </div>
 
-            {/* Metadata */}
-            <div className="card">
-              <h3 style={{ marginBottom: "1.25rem" }}>Thông tin câu hỏi</h3>
-              <div className="form-group">
-                <label className="form-label">Môn học</label>
-                <select
-                  className="select"
-                  value={subject}
-                  onChange={(e) => {
-                    const newSubj = e.target.value;
-                    setSubject(newSubj);
-                    const newGrades = Object.keys(
-                      (subjects as Record<string, Record<string, unknown>>)[
-                        newSubj
-                      ] || {},
-                    );
-                    setGrade(newGrades[0] || "12");
-                    setChapter("");
-                  }}
-                >
-                  {subjectList.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Khối lớp</label>
-                <select
-                  className="select"
-                  value={grade}
-                  onChange={(e) => {
-                    setGrade(e.target.value);
-                    setChapter("");
-                  }}
-                >
-                  {gradeList.map((g) => (
-                    <option key={g} value={g}>
-                      Lớp {g}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Chương (mặc định)</label>
-                <select
-                  className="select"
-                  value={chapter}
-                  onChange={(e) => setChapter(e.target.value)}
-                >
-                  <option value="">— Chọn chương —</option>
-                  {chapterList.map((c) => (
-                    <option key={c} value={c}>
-                      {c.slice(0, 60)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Mức độ mặc định</label>
-                <select
-                  className="select"
-                  value={complexity}
-                  onChange={(e) => setComplexity(+e.target.value)}
-                >
-                  {Object.entries(COMPLEXITY_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                className="btn btn-primary btn-block"
-                onClick={handleParse}
-                disabled={!file || loading}
-              >
-                {loading ? (
-                  <>
-                    <span className="spinner" /> Đang parse...
-                  </>
-                ) : (
-                  " Parse & Xem trước"
-                )}
-              </button>
-            </div>
+            <button
+              className="btn btn-primary btn-block btn-lg"
+              style={{ marginTop: "1rem" }}
+              onClick={handleParse}
+              disabled={!file || loading}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner" /> Đang parse...
+                </>
+              ) : (
+                " Parse & Xem trước"
+              )}
+            </button>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.8rem",
+                color: "var(--text-muted)",
+                textAlign: "center",
+              }}
+            >
+              Môn, khối, chương/bài và mức độ sẽ điền chung cho tất cả câu sau khi parse.
+            </p>
           </div>
         ) : (
           /* Preview */
@@ -402,6 +396,14 @@ export default function UploadPage() {
                   ← Hủy
                 </button>
                 <button
+                  className="btn btn-secondary"
+                  onClick={handleConfirmAsContest}
+                  disabled={loading}
+                  title="Lưu vào ngân hàng rồi tạo luôn thành 1 đề thi"
+                >
+                  Lưu & tạo đề thi
+                </button>
+                <button
                   className="btn btn-primary"
                   onClick={handleConfirm}
                   disabled={loading}
@@ -414,6 +416,118 @@ export default function UploadPage() {
                     ` Lưu ${countText}`
                   )}
                 </button>
+              </div>
+            </div>
+
+            {/* Thông tin chung — đồng bộ cho tất cả câu sau khi parse */}
+            <div
+              className="card"
+              style={{ marginBottom: "1.5rem", padding: "1rem 1.25rem" }}
+            >
+              <div
+                style={{
+                  fontWeight: 600,
+                  marginBottom: "0.75rem",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Thông tin chung — áp dụng cho tất cả {preview.length} câu
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.75rem",
+                  alignItems: "center",
+                }}
+              >
+                <select
+                  className="select"
+                  style={{ width: "auto" }}
+                  value={subject}
+                  onChange={(e) => {
+                    const s = e.target.value;
+                    setSubject(s);
+                    const gs = Object.keys(
+                      (subjects as Record<string, Record<string, unknown>>)[s] ||
+                        {},
+                    );
+                    setGrade(gs[0] || "12");
+                    setChapter("");
+                    setLesson("");
+                  }}
+                >
+                  {subjectList.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="select"
+                  style={{ width: "auto" }}
+                  value={grade}
+                  onChange={(e) => {
+                    const g = e.target.value;
+                    setGrade(g);
+                    setChapter("");
+                    setLesson("");
+                    applyToAll("grade", +g);
+                  }}
+                >
+                  {gradeList.map((g) => (
+                    <option key={g} value={g}>
+                      Lớp {g}
+                    </option>
+                  ))}
+                </select>
+                <Combobox
+                  className="select"
+                  style={{ flex: 1, minWidth: "180px" }}
+                  value={chapter}
+                  onChange={(val) => {
+                    setChapter(val);
+                    setLesson("");
+                    applyToAll("chapter", val);
+                  }}
+                  options={chapterList}
+                  placeholder="Chương (áp dụng tất cả)"
+                />
+                <Combobox
+                  className="select"
+                  style={{ flex: 1, minWidth: "180px" }}
+                  value={lesson}
+                  onChange={(val) => {
+                    setLesson(val);
+                    applyToAll("lesson", val);
+                  }}
+                  options={lessonList}
+                  placeholder="Bài (áp dụng tất cả)"
+                />
+                <select
+                  className="select"
+                  style={{ width: "auto" }}
+                  value={complexity}
+                  onChange={(e) => {
+                    setComplexity(+e.target.value);
+                    applyToAll("complexity", +e.target.value);
+                  }}
+                >
+                  {Object.entries(COMPLEXITY_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                  marginTop: "0.6rem",
+                }}
+              >
+                Đổi chương/bài/mức độ ở đây sẽ đồng bộ cho mọi câu; vẫn có thể chỉnh riêng từng câu bên dưới.
               </div>
             </div>
 
@@ -597,67 +711,48 @@ export default function UploadPage() {
                       className="question-content"
                     />
 
-                    {qtype === "mc" &&
-                      options.length > 0 &&
-                      (() => {
-                        const maxLen = Math.max(
-                          0,
-                          ...options.map(
-                            (o: any) => String(o.content || "").length,
-                          ),
-                        );
-                        const nOpts = options.length;
-                        let optColsClass = "";
-                        if (nOpts >= 4 && maxLen < 20) optColsClass = "mc-options-4";
-                        else if (nOpts >= 2 && maxLen < 40) optColsClass = "mc-options-2";
-
-                        return (
-                          <div
-                            className={`mc-options-grid ${optColsClass}`}
-                            style={{ marginLeft: "1rem", marginTop: "1rem" }}
-                          >
-                            {options.map((opt: any, oi: number) => {
-                              let bg = "var(--bg-elevated)";
-                              let border = "transparent";
-                              let textColor = "var(--text-secondary)";
-                              if (opt.is_correct) {
-                                bg = "rgba(107,203,119,0.1)";
-                                border = "var(--accent-success)";
-                                textColor = "var(--accent-success)";
-                              }
-                              return (
-                                <div
-                                  key={oi}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0.5rem",
-                                    padding: "0.4rem 0.75rem",
-                                    borderRadius: "var(--radius-md)",
-                                    background: bg,
-                                    border: `1px solid ${border}`,
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      fontWeight: 700,
-                                      color: textColor,
-                                    }}
-                                  >
-                                    {String.fromCharCode(65 + oi)}.
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                      <LatexRenderer
-                                        content={String(opt.content || "")}
-                                        images={q.image || q.images}
-                                      />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
+                    {qtype === "mc" && options.length > 0 && (
+                      <AdaptiveOptionGrid
+                        count={options.length}
+                        style={{ marginLeft: "1rem", marginTop: "1rem" }}
+                      >
+                        {options.map((opt: any, oi: number) => {
+                          let bg = "var(--bg-elevated)";
+                          let border = "transparent";
+                          let textColor = "var(--text-secondary)";
+                          if (opt.is_correct) {
+                            bg = "rgba(107,203,119,0.1)";
+                            border = "var(--accent-success)";
+                            textColor = "var(--accent-success)";
+                          }
+                          return (
+                            <div
+                              key={oi}
+                              data-opt-cell="1"
+                              style={{
+                                display: "flex",
+                                alignItems: "baseline",
+                                gap: "0.5rem",
+                                padding: "0.4rem 0.75rem",
+                                borderRadius: "var(--radius-md)",
+                                background: bg,
+                                border: `1px solid ${border}`,
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, color: textColor }}>
+                                {String.fromCharCode(65 + oi)}.
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <LatexRenderer
+                                  content={String(opt.content || "")}
+                                  images={q.image || q.images}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </AdaptiveOptionGrid>
+                    )}
 
                     {qtype === "tf" && options.length > 0 && (
                       <div
@@ -866,6 +961,14 @@ export default function UploadPage() {
                 ← Hủy
               </button>
               <button
+                className="btn btn-secondary btn-lg"
+                onClick={handleConfirmAsContest}
+                disabled={loading}
+                title="Lưu vào ngân hàng rồi tạo luôn thành 1 đề thi"
+              >
+                Lưu & tạo đề thi
+              </button>
+              <button
                 className="btn btn-primary btn-lg"
                 onClick={handleConfirm}
                 disabled={loading}
@@ -881,6 +984,55 @@ export default function UploadPage() {
             </div>
           </div>
         )}
+        {/* Modal nhập tên đề thi cho "Lưu & tạo đề thi" */}
+        {showContestModal && (
+          <div
+            style={{
+              position: "fixed", inset: 0, zIndex: 1100,
+              background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "2rem",
+            }}
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setShowContestModal(false);
+            }}
+          >
+            <div
+              style={{
+                width: "100%", maxWidth: 460,
+                background: "var(--bg-surface)",
+                borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow-lg)",
+                padding: "1.5rem",
+              }}
+            >
+              <h3 style={{ margin: "0 0 1rem" }}>Tạo đề thi từ các câu vừa import</h3>
+              <label className="form-label">Tên đề thi</label>
+              <input
+                className="input"
+                value={contestTitle}
+                autoFocus
+                onChange={(e) => setContestTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") doCreateContest();
+                }}
+                placeholder="Nhập tên đề thi"
+              />
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
+                Các câu sẽ được lưu vào ngân hàng và tạo thành 1 đề thi (mặc định: chưa mở, 45 phút). Có thể chỉnh lại sau ở trang đề thi.
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "1.25rem" }}>
+                <button className="btn btn-secondary" onClick={() => setShowContestModal(false)}>
+                  Hủy
+                </button>
+                <button className="btn btn-primary" onClick={doCreateContest} disabled={loading}>
+                  Tạo đề thi
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Edit modal — fixed overlay so page scroll is never affected */}
         {editModal && (
           <div

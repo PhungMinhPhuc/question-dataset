@@ -41,10 +41,15 @@ def tikz_to_svg(tikz_code, output_path):
             f.write(latex_template)
 
         try:
-            subprocess.run([
+            proc = subprocess.run([
                     "xelatex", "-interaction=nonstopmode", "tikz2svg_temp.tex"],
                 cwd=tmpdir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+            if proc.returncode != 0:
+                subprocess.run([
+                        "lualatex", "-interaction=nonstopmode", "tikz2svg_temp.tex"],
+                    cwd=tmpdir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
             pdf_file = os.path.join(tmpdir, "tikz2svg_temp.pdf")
             if os.path.exists(pdf_file):
                 subprocess.run(
@@ -58,6 +63,11 @@ def tikz_to_svg(tikz_code, output_path):
                 svg_temp_path = os.path.join(tmpdir, "tikz2svg_temp.svg")
                 if os.path.exists(svg_temp_path):
                     shutil.copy2(svg_temp_path, output_path)
+                    
+                    # Also save the PDF for fast LaTeX compilation later
+                    pdf_output_path = output_path.replace('.svg', '.pdf')
+                    shutil.copy2(pdf_file, pdf_output_path)
+                    
                     return True
         except Exception as e:
             print(f"TikZ_Error: {e}")

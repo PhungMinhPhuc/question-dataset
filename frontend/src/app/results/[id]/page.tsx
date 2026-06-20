@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
 import LatexRenderer from '@/components/LatexRenderer';
+import AdaptiveOptionGrid from '@/components/AdaptiveOptionGrid';
 import api from '@/lib/api';
 import Link from 'next/link';
 
@@ -162,6 +163,8 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
   b.instruction = `Thí sinh trả lời từ câu 1 đến câu ${totalInBlock}. Trong mỗi ý a), b), c), d) ở mỗi câu hỏi, thí sinh chọn đúng hoặc sai.`;
   } else if (b.id === 'sa') {
   b.instruction = `Thí sinh trả lời từ câu 1 đến câu ${totalInBlock}.`;
+  } else if (b.id === 'oe') {
+  b.instruction = `Thí sinh trả lời từ câu 1 đến câu ${totalInBlock}.`;
   }
  });
 
@@ -259,15 +262,8 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
        <LatexRenderer content={node.content} layoutType={node.layout_type} images={node.images} className="question-content" />
        
        {/* Render Options if any (re-sorted) */}
-       {node.question_type === 'mc' && node.options && (() => {
-        const maxLen = Math.max(0, ...node.options.map((o: any) => o.content?.length || 0));
-        const nOpts = node.options.length;
-        let optColsClass = '';
-        if (nOpts >= 4 && maxLen < 20) optColsClass = 'mc-options-4';
-        else if (nOpts >= 2 && maxLen < 40) optColsClass = 'mc-options-2';
-
-        return (
-        <div className={`mc-options-grid ${optColsClass}`} style={{ marginLeft: '1rem', marginTop: '1rem' }}>
+       {node.question_type === 'mc' && node.options && (
+        <AdaptiveOptionGrid count={node.options.length} style={{ marginLeft: '1rem', marginTop: '1rem' }}>
         {node.options.map((opt: any, oi: number) => {
          const isSelected = sub.student_choice?.trim() === opt.content.trim();
          const isCorrectOption = opt.is_correct;
@@ -287,8 +283,8 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
          }
 
          return (
-         <div key={opt.id} style={{
-          display: 'flex', alignItems: 'center', gap: '0.5rem',
+         <div key={opt.id} data-opt-cell="1" style={{
+          display: 'flex', alignItems: 'baseline', gap: '0.5rem',
           padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)',
           background: bg, border: `1px solid ${border}`,
           minWidth: 0, overflow: 'hidden'
@@ -298,9 +294,8 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
          </div>
          );
         })}
-        </div>
-        );
-       })()}
+        </AdaptiveOptionGrid>
+       )}
 
        {node.question_type === 'tf' && node.options && (
         <div style={{ marginLeft: '1rem', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -309,16 +304,18 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
           let userChoice: any = choicesStr[oi];
           if (userChoice !== "T" && userChoice !== "F") userChoice = null;
           
-          let userChoiceStr = userChoice === "T" ? "Đúng" : userChoice === "F" ? "Sai" : "Bỏ qua";
           let bg = 'var(--bg-elevated)';
           let border = 'var(--border)';
           
-          if (userChoiceStr === "Đúng") {
-             bg = 'rgba(255,107,107,0.1)';
-             border = 'rgba(255,107,107,0.4)';
-          } else if (userChoiceStr === "Sai") {
-             bg = 'rgba(107,203,119,0.1)';
-             border = 'rgba(107,203,119,0.4)';
+          if (userChoice !== null) {
+              const isCorrectChoice = userChoice === (opt.is_correct ? 'T' : 'F');
+              if (isCorrectChoice) {
+                 bg = 'rgba(107,203,119,0.1)';
+                 border = 'rgba(107,203,119,0.4)';
+              } else {
+                 bg = 'rgba(255,107,107,0.1)';
+                 border = 'rgba(255,107,107,0.4)';
+              }
           }
 
          return (

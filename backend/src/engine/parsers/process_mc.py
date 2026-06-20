@@ -1,7 +1,7 @@
 import re
-from get_bracket_content import get_bracket_content
-from extract_loigiai import extract_loigiai
-from parse_visuals import *
+from utils.get_bracket_content import get_bracket_content
+from utils.extract_loigiai import extract_loigiai
+from utils.parse_visuals import *
 
 def clean_centering_commands(text):
     if not text: return ""

@@ -193,7 +193,7 @@ def get_subjects():
     engine_path = os.path.join(os.path.dirname(__file__), "..", "..", "backend", "src", "engine")
     if engine_path not in sys.path:
         sys.path.insert(0, engine_path)
-    from curriculum import DATA
+    from data.curriculum import DATA
     return DATA
 
 @router.get("/{question_id}")
@@ -434,6 +434,27 @@ def update_question(
     background_tasks.add_task(regrade_question_submissions, question_id)
 
     return {"message": "Cập nhật thành công"}
+
+
+@router.delete("/all")
+def delete_all_questions(
+    current_user: dict = Depends(get_current_teacher),
+):
+    """Soft-delete every question owned by the current teacher (parents and children).
+
+    Declared BEFORE the /{question_id} route on purpose: FastAPI matches routes in
+    order, and "all" would otherwise be captured by /{question_id} and fail int
+    validation. Uses the same soft-delete (deleted_at) as single deletion so existing
+    contests keep working and nothing is physically removed.
+    """
+    with get_cursor() as (cur, conn):
+        cur.execute(
+            "UPDATE questions SET deleted_at = NOW() WHERE teacher_id = %s AND deleted_at IS NULL",
+            (current_user["user_id"],),
+        )
+        count = cur.rowcount
+        conn.commit()
+    return {"message": f"Đã xóa {count} câu hỏi", "count": count}
 
 
 @router.delete("/{question_id}")

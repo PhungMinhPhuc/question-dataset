@@ -2,7 +2,7 @@ import os
 import shutil
 import re
 from datetime import datetime
-from tikz_converter import tikz_to_svg
+from utils.tikz_converter import tikz_to_svg
 
 import threading
 

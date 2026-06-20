@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
 import LatexRenderer from '@/components/LatexRenderer';
+import AdaptiveOptionGrid from '@/components/AdaptiveOptionGrid';
 import { QuestionEditor, QuestionDetail } from '@/components/QuestionEditor';
 import api from '@/lib/api';
 import Link from 'next/link';
@@ -57,6 +58,24 @@ export default function QuestionsPage() {
  fetchQuestions();
  };
 
+ const [deletingAll, setDeletingAll] = useState(false);
+ const handleDeleteAll = async () => {
+ if (total === 0) { alert('Ngân hàng đang trống.'); return; }
+ if (!confirm(`Xóa TẤT CẢ ${total.toLocaleString()} mục trong ngân hàng câu hỏi? Hành động này không thể hoàn tác.`)) return;
+ if (!confirm('Xác nhận lần nữa: xóa toàn bộ câu hỏi của bạn?')) return;
+ setDeletingAll(true);
+ try {
+  const res = await api.deleteAllQuestions();
+  alert(res.message || 'Đã xóa toàn bộ câu hỏi');
+  setPage(1);
+  fetchQuestions();
+ } catch (e: unknown) {
+  alert(e instanceof Error ? e.message : 'Lỗi khi xóa toàn bộ câu hỏi');
+ } finally {
+  setDeletingAll(false);
+ }
+ };
+
  const [detailModal, setDetailModal] = useState<{ question: QuestionDetail; saving: boolean; error: string } | null>(null);
 
  const openDetail = async (id: number) => {
@@ -75,7 +94,7 @@ export default function QuestionsPage() {
     subject: q.subject, grade: q.grade, chapter: q.chapter,
     lesson: q.lesson, complexity: q.complexity,
     content: q.content, solution: q.solution,
-    details: q.details?.map(d => ({ id: d.id, content: d.content, is_correct: d.is_correct })),
+    details: q.details?.map(d => ({ id: d.id, content: d.content, is_correct: d.is_correct, explaination: d.explaination })),
    });
    setDetailModal(null);
    fetchQuestions();
@@ -127,13 +146,18 @@ export default function QuestionsPage() {
    <p className="page-sub">Tổng: {total.toLocaleString()} mục - {totalQuestions.toLocaleString()} câu hỏi</p>
    </div>
    {user?.role === 'teacher' && (
-   <Link href="/questions/upload" className="btn btn-primary"> Upload</Link>
+   <div style={{ display: 'flex', gap: '0.5rem' }}>
+    <button className="btn btn-danger" onClick={handleDeleteAll} disabled={deletingAll || total === 0}>
+     {deletingAll ? 'Đang xóa...' : 'Xóa tất cả'}
+    </button>
+    <Link href="/questions/upload" className="btn btn-primary"> Upload</Link>
+   </div>
    )}
   </div>
 
   {/* Filters */}
   <div className="filter-bar">
-   <input className="input" placeholder=" Tìm nội dung..." value={filters.search} onChange={e => setFilter('search', e.target.value)} style={{ flex: 2 }} />
+   <input className="input search-input" placeholder=" Tìm nội dung..." value={filters.search} onChange={e => setFilter('search', e.target.value)} />
    <select className="select" value={filters.subject} onChange={e => setFilter('subject', e.target.value)}>
    <option value="">Tất cả môn</option>
    {subjectList.map(s => <option key={s} value={s}>{s}</option>)}
@@ -211,19 +235,12 @@ export default function QuestionsPage() {
        )}
        <LatexRenderer content={node.content} layoutType={node.layout_type} images={node.images} className="question-content" />
 
-     {/* Options */}
-     {node.question_type === 'mc' && node.options && (() => {
-      const maxLen = Math.max(0, ...node.options.map((o: any) => o.content?.length || 0));
-      const nOpts = node.options.length;
-      let optColsClass = '';
-      if (nOpts >= 4 && maxLen < 20) optColsClass = 'mc-options-4';
-      else if (nOpts >= 2 && maxLen < 40) optColsClass = 'mc-options-2';
-
-      return (
-      <div className={`mc-options-grid ${optColsClass}`} style={{ marginTop: '0.75rem' }}>
+     {/* Options — số cột tự điều chỉnh theo render thật (xem AdaptiveOptionGrid) */}
+     {node.question_type === 'mc' && node.options && (
+      <AdaptiveOptionGrid count={node.options.length} style={{ marginTop: '0.75rem' }}>
       {node.options.map((opt: any, oi: number) => (
-       <div key={opt.id} style={{
-       display: 'flex', gap: '0.5rem', alignItems: 'center',
+       <div key={opt.id} data-opt-cell="1" style={{
+       display: 'flex', gap: '0.5rem', alignItems: 'baseline',
        padding: '0.4rem 0.75rem', background: opt.is_correct ? 'rgba(107,203,119,0.1)' : 'var(--bg-elevated)',
        borderRadius: 'var(--radius-sm)', border: `1px solid ${opt.is_correct ? 'var(--accent-success)' : 'transparent'}`
        }}>
@@ -231,9 +248,8 @@ export default function QuestionsPage() {
        <LatexRenderer content={opt.content} images={node.images} />
        </div>
       ))}
-      </div>
-      );
-     })()}
+      </AdaptiveOptionGrid>
+     )}
 
      {node.question_type === 'tf' && node.options && (
       <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>

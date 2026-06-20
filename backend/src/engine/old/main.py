@@ -1,12 +1,12 @@
 import json
 import re
-from process_mc import process_mc_block
-from process_tf import process_tf_block
-from process_sa import process_sa_block
-from process_oe import process_oe_block
-from process_stimulus import process_stimulus_block
-from get_bracket_content import get_bracket_content
-from extract_loigiai import extract_loigiai
+from parsers.process_mc import process_mc_block
+from parsers.process_tf import process_tf_block
+from parsers.process_sa import process_sa_block
+from parsers.process_oe import process_oe_block
+from parsers.process_stimulus import process_stimulus_block
+from utils.get_bracket_content import get_bracket_content
+from utils.extract_loigiai import extract_loigiai
 
 # Nhận diện loại câu hỏi và gọi hàm xử lý tương ứng
 def dispatch_block(block, q_id, parent_id, teacher_id, subject_id, grade, metadata):

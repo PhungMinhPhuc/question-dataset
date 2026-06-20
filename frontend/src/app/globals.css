@@ -19,7 +19,9 @@
   --text-muted: #000000;
 
   --border: #e5e7eb;
+  --border-strong: #c2cbd9;
   --border-focus: #4f46e5;
+  --text-placeholder: #9ca3af;
 
   --gradient-hero: #4f46e5;
   --gradient-card: rgba(79, 70, 229, 0.06);
@@ -157,35 +159,46 @@ a:hover { opacity: 0.8; }
 /* ── Forms ────────────────────────────────────────────────────────── */
 .form-group { margin-bottom: 1.25rem; }
 .form-label { 
-  display: inline-block; 
-  font-size: 0.75rem; 
-  font-weight: 700; 
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent-primary); 
-  background: rgba(108, 99, 255, 0.08);
-  padding: 0.25rem 0.6rem;
-  border-radius: 4px;
-  margin-bottom: 0.5rem; 
+    display: inline-block; 
+    font-size: 0.75rem; 
+    font-weight: 700; 
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #4338ca;
+    background: #e0e7ff;
+    border: 1px solid #c7d2fe;
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    margin-bottom: 0.6rem;
 }
 
 .input, .select, .textarea {
-  width: 100%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.625rem 0.875rem;
-  color: var(--text-primary);
-  font-size: 0.875rem;
-  font-family: inherit;
-  transition: border-color var(--transition);
-  outline: none;
+    width: 100%;
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: #0f172a;
+    font-size: 0.95rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: all 0.2s;
+    outline: none;
+}
+.input:hover, .select:hover, .textarea:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 .input:focus, .select:focus, .textarea:focus {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px rgba(108,99,255,0.1);
+    background: #ffffff;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 4px rgba(79,70,229,0.15);
 }
-.input::placeholder { color: var(--text-muted); }
+.input::placeholder,
+.select::placeholder,
+.textarea::placeholder,
+input::placeholder,
+textarea::placeholder { color: var(--text-placeholder); opacity: 1; }
 
 .select { cursor: pointer; }
 .select option { background: var(--bg-surface); }
@@ -544,6 +557,15 @@ tbody td { padding: 0.875rem 1rem; font-size: 0.875rem; }
 }
 .filter-bar .input, .filter-bar .select {
   width: auto; flex: 1; min-width: 140px;
+  margin-bottom: 0;
+}
+.filter-bar .search-input {
+  flex: 2;
+}
+@media (max-width: 1400px) {
+  .filter-bar .search-input {
+    flex: 1 1 100%;
+  }
 }
 
 /* ── Pagination ───────────────────────────────────────────────────── */
@@ -562,6 +584,23 @@ tbody td { padding: 0.875rem 1rem; font-size: 0.875rem; }
     transition: all var(--transition);
   }
 .page-btn:hover, .page-btn.active { border-color: var(--accent-primary); background: rgba(108,99,255,0.15); color: var(--accent-primary); }
+
+.btn-format {
+  min-width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.95rem;
+  transition: all 0.15s;
+}
+.btn-format:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
 
 /* ── Animations ───────────────────────────────────────────────────── */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -681,8 +720,6 @@ tbody td { padding: 0.875rem 1rem; font-size: 0.875rem; }
 }
 .latex-content mjx-container {
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 .latex-content .MathJax_Display {
   overflow-x: auto;
@@ -691,9 +728,9 @@ tbody td { padding: 0.875rem 1rem; font-size: 0.875rem; }
 }
 
 .latex-content {
-  overflow-x: auto;
-  overflow-y: hidden;
   max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 mjx-container[display='true'] {
@@ -705,3 +742,30 @@ mjx-container[display='true'] {
 /* Latex tables */
 .latex-content table, .latex-content th, .latex-content td { border: 1.5px solid #000 !important; border-collapse: collapse; }
 .latex-content th, .latex-content td { padding: 0.5rem; }
+.option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: #f8fafc;
+  border: 1.5px solid transparent;
+  border-left: 4px solid #cbd5e1;
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+  margin-bottom: 1rem;
+}
+.option-card:focus-within {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  border-left-color: var(--accent-primary);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+.option-card.is-correct {
+  background: rgba(16,185,129,0.05);
+  border-left-color: #10b981;
+}
+.option-card.is-correct:focus-within {
+  background: #ffffff;
+  border-color: #10b981;
+  box-shadow: 0 4px 12px rgba(16,185,129,0.15);
+}

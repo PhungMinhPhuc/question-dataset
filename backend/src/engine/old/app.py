@@ -6,8 +6,8 @@ import tempfile
 import re
 import zipfile
 import shutil
-from logic_manager import run_parser
-from curriculum import DATA
+from parsers.logic_manager import run_parser
+from data.curriculum import DATA
 
 # Đường dẫn mặc định nếu chỉ upload file .tex lẻ
 source_img_path_default = r"E:\Downloads\Test_latex\extracted_figures"

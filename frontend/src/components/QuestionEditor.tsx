@@ -14,7 +14,7 @@ export type QuestionDetail = {
   solution?: string;
   teacher_name?: string;
   images?: { storage_path: string; img_scale?: number; img_type?: string }[];
-  details?: { id?: number; content: string; is_correct?: boolean }[];
+  details?: { id?: number; content: string; is_correct?: boolean; explaination?: string }[];
   children?: QuestionDetail[];
 };
 
@@ -146,38 +146,47 @@ export const QuestionEditor = ({
       >
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "1rem",
+            background: "#f1f5f9",
+            borderRadius: "1rem",
+            padding: "1.25rem 1.5rem",
+            marginBottom: "1.5rem",
           }}
         >
-          {!isChild && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Môn học</label>
-                <Combobox className="select" value={qData.subject || ""} onChange={(val) => handleChange("subject", val)} options={subjOptions} placeholder="Môn học" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Khối lớp</label>
-                <Combobox className="select" value={qData.grade || ""} onChange={(val) => handleChange("grade", parseInt(val) || 0)} options={gradeOptions} placeholder="Khối lớp" />
-              </div>
-            </>
-          )}
-          <div className="form-group">
-            <label className="form-label">Chương</label>
-            <Combobox className="select" value={qData.chapter || ""} onChange={(val) => handleChange("chapter", val)} options={chapterOptions} placeholder="Chương" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Bài học</label>
-            <Combobox className="select" value={qData.lesson || ""} onChange={(val) => handleChange("lesson", val)} options={lessonOptions} placeholder="Bài học" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Mức độ</label>
-            <Combobox className="select" value={qData.complexity || 1} onChange={(val) => handleChange("complexity", parseInt(val))} options={Object.entries(COMPLEXITY_LABELS).map(([k, v]) => ({ value: +k, label: v }))} placeholder="Mức độ" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "1.25rem 1rem",
+            }}
+          >
+            {!isChild && (
+              <>
+                <div className="form-group">
+                  <label className="form-label">Môn học</label>
+                  <Combobox className="select" value={qData.subject || ""} onChange={(val) => handleChange("subject", val)} options={subjOptions} placeholder="Môn học" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Khối lớp</label>
+                  <Combobox className="select" value={qData.grade || ""} onChange={(val) => handleChange("grade", parseInt(val) || 0)} options={gradeOptions} placeholder="Khối lớp" />
+                </div>
+              </>
+            )}
+            <div className="form-group">
+              <label className="form-label">Chương</label>
+              <Combobox className="select" value={qData.chapter || ""} onChange={(val) => handleChange("chapter", val)} options={chapterOptions} placeholder="Chương" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Bài học</label>
+              <Combobox className="select" value={qData.lesson || ""} onChange={(val) => handleChange("lesson", val)} options={lessonOptions} placeholder="Bài học" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Mức độ</label>
+              <Combobox className="select" value={qData.complexity || 1} onChange={(val) => handleChange("complexity", parseInt(val))} options={Object.entries(COMPLEXITY_LABELS).map(([k, v]) => ({ value: +k, label: v }))} placeholder="Mức độ" />
+            </div>
           </div>
         </div>
 
-        <div>
+        <div style={{ marginBottom: "1rem", marginTop: "1rem" }}>
           <label className="form-label">Nội dung đề bài</label>
           <RichLatexEditor
             content={qData.content || ""}
@@ -191,20 +200,15 @@ export const QuestionEditor = ({
 
         {qData.details && qData.details.length > 0 && qData.question_type === "sa" && (
           <div>
-            <label className="form-label">Đáp án</label>
+            <label className="form-label">Trả lời ngắn</label>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               {qData.details.map((det, idx) => (
-                <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
-                  <span style={{ fontWeight: 600, whiteSpace: "nowrap", color: "var(--text-secondary)", paddingTop: "0.75rem" }}>
-                    Trả lời ngắn:
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <RichLatexEditor
-                      content={det.content || ""}
-                      onChange={(val) => handleDetailChange(idx, "content", val)}
-                    />
-                  </div>
-                </div>
+                <RichLatexEditor
+                  key={idx}
+                  content={det.content || ""}
+                  onChange={(val) => handleDetailChange(idx, "content", val)}
+                  placeholder="Nhập đáp án..."
+                />
               ))}
             </div>
           </div>
@@ -212,129 +216,171 @@ export const QuestionEditor = ({
 
         {qData.details && qData.details.length > 0 && qData.question_type !== "sa" && (
           <div>
-            <label className="form-label">Các lựa chọn / Chi tiết đáp án</label>
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
-            >
-              {qData.details.map((det, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: "1rem",
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-md)",
-                  }}
-                >
+            <label className="form-label">
+              {qData.question_type === "tf" ? "Các ý Đúng / Sai" : "Phương án trả lời"}
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              {qData.details.map((det, idx) => {
+                const isMC = qData.question_type === "mc";
+                const letter = isMC
+                  ? String.fromCharCode(65 + idx)
+                  : `${String.fromCharCode(97 + idx)})`;
+                const correct = !!det.is_correct;
+                return (
                   <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: "0.5rem",
-                    }}
+                    key={idx}
+                    className={`option-card ${correct && isMC ? 'is-correct' : ''}`}
                   >
-                    <span style={{ fontWeight: 600 }}>Lựa chọn {idx + 1}</span>
-                    {qData.question_type === "mc" && (
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name={`correct_${qData.id}_${isChild ? childIndex : "parent"}`}
-                          checked={det.is_correct}
-                          onChange={() => {
-                            const newDetails = qData.details!.map((d, i) => ({
-                              ...d,
-                              is_correct: i === idx,
-                            }));
-                            onChange({ ...qData, details: newDetails });
-                          }}
-                        />
-                        <span
-                          style={{
-                            color: det.is_correct
-                              ? "var(--accent-success)"
-                              : "inherit",
-                            fontWeight: det.is_correct ? 700 : 400,
-                          }}
-                        >
-                          Đáp án đúng
-                        </span>
-                      </label>
-                    )}
-                    {qData.question_type === "tf" && (
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={det.is_correct}
-                          onChange={(e) =>
-                            handleDetailChange(
-                              idx,
-                              "is_correct",
-                              e.target.checked,
-                            )
-                          }
-                        />
-                        <span
-                          style={{
-                            color: det.is_correct
-                              ? "var(--accent-success)"
-                              : "inherit",
-                            fontWeight: det.is_correct ? 700 : 400,
-                          }}
-                        >
-                          ĐÚNG
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "1rem",
-                      alignItems: "flex-start",
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, marginTop: "0.5rem" }}>
-                      {String.fromCharCode(65 + idx)}.
-                    </div>
                     <div
+                      onClick={
+                        isMC
+                          ? () =>
+                              onChange({
+                                ...qData,
+                                details: qData.details!.map((d, i) => ({ ...d, is_correct: i === idx })),
+                              })
+                          : undefined
+                      }
+                      title={isMC ? "Bấm để chọn làm đáp án đúng" : undefined}
                       style={{
-                        flex: 1,
+                        flexShrink: 0,
+                        width: 34,
+                        height: 34,
+                        marginTop: 2,
+                        borderRadius: "8px",
                         display: "flex",
-                        flexDirection: "column",
-                        gap: "0.5rem",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                        fontSize: "1.05rem",
+                        cursor: isMC ? "pointer" : "default",
+                        userSelect: "none",
+                        background: correct && isMC ? "#10b981" : "#f1f5f9",
+                        color: correct && isMC ? "#ffffff" : "#0f172a",
+                        border: "none",
+                        transition: "all 0.2s",
                       }}
                     >
+                      {letter}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <RichLatexEditor
                         content={det.content || ""}
-                        onChange={(val) =>
-                          handleDetailChange(idx, "content", val)
-                        }
+                        onChange={(val) => handleDetailChange(idx, "content", val)}
                       />
+                      {!isMC && (
+                        <div style={{ marginTop: "0.6rem" }}>
+                          <label
+                            style={{
+                              display: "block",
+                              fontSize: "0.78rem",
+                              fontWeight: 600,
+                              color: "var(--text-secondary)",
+                              marginBottom: "0.3rem",
+                            }}
+                          >
+                            Giải thích cho ý {letter}
+                          </label>
+                          <RichLatexEditor
+                            content={det.explaination || ""}
+                            onChange={(val) => handleDetailChange(idx, "explaination", val)}
+                            placeholder="Giải thích vì sao ý này đúng/sai (tùy chọn)"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ flexShrink: 0, marginTop: 4 }}>
+                      {isMC ? (
+                        <label
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name={`correct_${qData.id}_${isChild ? childIndex : "parent"}`}
+                            checked={correct}
+                            onChange={() =>
+                              onChange({
+                                ...qData,
+                                details: qData.details!.map((d, i) => ({ ...d, is_correct: i === idx })),
+                              })
+                            }
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.85rem",
+                              color: correct ? "var(--accent-success)" : "var(--text-secondary)",
+                              fontWeight: correct ? 700 : 500,
+                            }}
+                          >
+                            Đúng
+                          </span>
+                        </label>
+                      ) : (
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            flexDirection: "column",
+                            background: "#f1f5f9",
+                            borderRadius: 8,
+                            overflow: "hidden",
+                            width: 64,
+                            boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.05)",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleDetailChange(idx, "is_correct", true)}
+                            style={{
+                              padding: "0.4rem 0",
+                              border: "none",
+                              borderBottom: "1px solid rgba(0,0,0,0.05)",
+                              cursor: "pointer",
+                              fontSize: "0.85rem",
+                              background: correct ? "var(--accent-success)" : "#fff",
+                              color: correct ? "#fff" : "var(--text-primary)",
+                              fontWeight: correct ? 700 : 500,
+                            }}
+                          >
+                            Đúng
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDetailChange(idx, "is_correct", false)}
+                            style={{
+                              padding: "0.4rem 0",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "0.85rem",
+                              background: !correct ? "var(--accent-danger)" : "#fff",
+                              color: !correct ? "#fff" : "var(--text-primary)",
+                              fontWeight: !correct ? 700 : 500,
+                            }}
+                          >
+                            Sai
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
         {(qData.solution !== undefined || qData.question_type !== "st") && (
-          <div>
-            <label className="form-label">Lời giải chi tiết</label>
+          <div style={{ marginTop: "1rem" }}>
+            <label className="form-label">
+              {qData.question_type === "tf" ? "Lời giải chung" : "Lời giải chi tiết"}
+            </label>
             <RichLatexEditor
               content={qData.solution || ""}
               onChange={(val) => handleChange("solution", val)}

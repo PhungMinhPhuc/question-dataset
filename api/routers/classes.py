@@ -96,6 +96,25 @@ def get_class(class_id: int, current_user: dict = Depends(get_current_user)):
     return result
 
 
+@router.delete("/{class_id}")
+def delete_class(class_id: int, current_user: dict = Depends(get_current_teacher)):
+    """Xóa lớp của giáo viên. Gỡ thành viên và tách các đề thi (giữ lại đề + kết quả,
+    chỉ bỏ gán lớp) để không vướng khóa ngoại."""
+    with get_cursor() as (cur, conn):
+        cur.execute(
+            "SELECT 1 FROM classes WHERE id = %s AND teacher_id = %s",
+            (class_id, current_user["user_id"]),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=403, detail="Không có quyền xóa lớp này")
+
+        cur.execute("DELETE FROM students_classes WHERE class_id = %s", (class_id,))
+        cur.execute("UPDATE contests SET class_id = NULL WHERE class_id = %s", (class_id,))
+        cur.execute("DELETE FROM classes WHERE id = %s", (class_id,))
+        conn.commit()
+    return {"message": "Đã xóa lớp"}
+
+
 @router.post("/join")
 def join_class(body: JoinClassRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "student":
