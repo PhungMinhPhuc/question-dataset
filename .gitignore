@@ -1,10 +1,61 @@
-Sample
-build
-password.txt
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+.turbo/
+*-debug.log*
+.pnpm-debug.log*
+
+# ===== Môi trường / bí mật =====
 .env
-%OUTDIR%
+.env.*
+!.env.example
+password.txt
+
+# ===== LaTeX build artifacts =====
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.thm
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+# file test LaTeX sinh ra khi compile thử
+test_*.tex
+test_*.pdf
+test_*.txt
+
+# ===== Build / output =====
+build/
+dist/
+%OUTDIR%/
 /%OUTDIR%/
 /storage/
-.venv
-.vscode
-/__pycache__/
+Sample/
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
