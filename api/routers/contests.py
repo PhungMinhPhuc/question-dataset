@@ -3,9 +3,38 @@ import uuid
 from fastapi import APIRouter, HTTPException, Depends, Body
 from db import get_cursor
 from auth import get_current_teacher, get_current_user, optional_user
-from models import ContestCreateRequest, ContestSubmitRequest, StartContestRequest, RandomContestRequest
+from models import ContestCreateRequest, ContestSubmitRequest, StartContestRequest, RandomContestRequest, ContestUpdateRequest
 
 router = APIRouter(prefix="/contests", tags=["Contests"])
+
+# Thang điểm mặc định (theo quy chế thi THPT): TN 0.25/câu, ĐS 1.0/câu,
+# TLN 0.5/câu, TL 1.0/câu. Dùng khi đề không lưu scoring_config.
+DEFAULT_SCORING = {"mc": 0.25, "tf": 1.0, "sa": 0.5, "oe": 1.0}
+
+# Câu Đúng/Sai (tf) chấm theo số ý đúng: 1 ý = 10%, 2 ý = 25%, 3 ý = 50%,
+# 4 ý = 100% số điểm tối đa của câu (quy chế THPT, áp dụng cho câu có 4 ý).
+TF_LADDER_4 = {0: 0.0, 1: 0.1, 2: 0.25, 3: 0.5, 4: 1.0}
+
+
+def tf_score_fraction(match_count: int, total: int) -> float:
+    """Tỉ lệ điểm (0..1) của một câu Đúng/Sai theo số ý trả lời đúng."""
+    if total <= 0:
+        return 0.0
+    if total == 4:
+        return TF_LADDER_4.get(match_count, 0.0)
+    # Số ý khác 4: nội suy tuyến tính theo tỉ lệ ý đúng.
+    return match_count / total
+
+
+def weight_for_type(scoring_config: dict, qtype: str) -> float:
+    """Số điểm tối đa của một câu theo loại, lấy từ scoring_config của đề."""
+    if qtype == "st":
+        return 0.0  # câu 'chung giả thiết' không tính điểm, điểm nằm ở câu con
+    config = scoring_config or {}
+    try:
+        return float(config.get(qtype, DEFAULT_SCORING.get(qtype, 1.0)))
+    except (TypeError, ValueError):
+        return DEFAULT_SCORING.get(qtype, 1.0)
 
 
 @router.get("")
@@ -81,27 +110,30 @@ def create_contest(body: ContestCreateRequest, current_user: dict = Depends(get_
         # Validate ST questions have at least 2 children
         st_parent_ids = []
         child_parent_ids = []
+        qtype_map = {}
         if body.question_ids:
             cur.execute("SELECT id, question_type, parent_id FROM questions WHERE id = ANY(%s)", (body.question_ids,))
             qs = cur.fetchall()
             for q in qs:
+                qtype_map[q["id"]] = q["question_type"]
                 if q["question_type"] == "st":
                     st_parent_ids.append(q["id"])
                 if q["parent_id"] is not None:
                     child_parent_ids.append(q["parent_id"])
-                    
+
             for st_id in st_parent_ids:
                 if child_parent_ids.count(st_id) < 2:
                     raise HTTPException(status_code=400, detail="Mỗi câu chung giả thiết phải có ít nhất 2 câu hỏi con đi kèm!")
 
-        # Thêm câu hỏi vào đề
+        # Thêm câu hỏi vào đề — gán điểm tối đa từng câu theo loại + thang điểm
         for order, q_id in enumerate(body.question_ids, 1):
+            weight = weight_for_type(body.scoring_config, qtype_map.get(q_id))
             cur.execute(
                 """
                 INSERT INTO contests_questions (contest_id, question_id, original_order, point_weight)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (contest_id, q_id, order, 1.0)
+                (contest_id, q_id, order, weight)
             )
         conn.commit()
 
@@ -152,6 +184,7 @@ def create_random_contest(body: RandomContestRequest, current_user: dict = Depen
         type_order = {"mc": 1, "tf": 2, "sa": 3, "oe": 4}
         picked = sorted(picked, key=lambda r: type_order.get(r["question_type"], 99))
         question_ids = [r["id"] for r in picked]
+        qtype_map = {r["id"]: r["question_type"] for r in picked}
 
         cur.execute(
             """
@@ -168,12 +201,13 @@ def create_random_contest(body: RandomContestRequest, current_user: dict = Depen
         contest_id = contest["id"]
 
         for order, q_id in enumerate(question_ids, 1):
+            weight = weight_for_type(body.scoring_config, qtype_map.get(q_id))
             cur.execute(
                 """
                 INSERT INTO contests_questions (contest_id, question_id, original_order, point_weight)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (contest_id, q_id, order, 1.0),
+                (contest_id, q_id, order, weight),
             )
         conn.commit()
 
@@ -283,6 +317,13 @@ def submit_contest(
         )
         questions_meta = {r["question_id"]: dict(r) for r in cur.fetchall()}
 
+        # Điểm tối đa của đề = tổng điểm tối đa từng câu (câu 'st' = 0)
+        max_score = round(sum(
+            float(m.get("point_weight") or 0.0)
+            for m in questions_meta.values()
+            if m.get("question_type") != "st"
+        ), 2)
+
         total_score = 0.0
         wrong_count = 0
 
@@ -315,10 +356,10 @@ def submit_contest(
                 statements = cur.fetchall()
                 correct_str = "".join("T" if s["is_correct"] else "F" for s in statements)
                 match_count = sum(1 for a, b in zip(student_choice, correct_str) if a == b)
-                # Chấm theo số statement đúng (0, 25%, 50%, 75%, 100%)
+                # Chấm theo số ý đúng: 1 ý=10%, 2 ý=25%, 3 ý=50%, 4 ý=100% (quy chế THPT)
                 if len(correct_str) > 0:
-                    ratio = match_count / len(correct_str)
-                    earned = round(weight * ratio, 4)
+                    frac = tf_score_fraction(match_count, len(correct_str))
+                    earned = round(weight * frac, 4)
                     is_correct = (match_count == len(correct_str))
 
             elif q_type == "sa":
@@ -361,6 +402,7 @@ def submit_contest(
 
     return {
         "total_score": total_score,
+        "max_score": max_score,
         "wrong_count": wrong_count,
         "contest_result_id": body.contest_result_id
     }
@@ -434,7 +476,16 @@ def get_result(result_id: int, current_user: dict = Depends(optional_user)):
             else:
                 q["options"] = []
 
-    return {"result": dict(result), "submissions": submissions, "questions": questions}
+        # Điểm tối đa của đề (tổng điểm tối đa từng câu, bỏ câu 'st')
+        max_score = round(sum(
+            float(q.get("point_weight") or 0.0)
+            for q in questions
+            if q.get("question_type") != "st"
+        ), 2)
+
+    result_data = dict(result)
+    result_data["max_score"] = max_score
+    return {"result": result_data, "submissions": submissions, "questions": questions}
 
 
 @router.delete("/results/{result_id}")
@@ -500,3 +551,37 @@ def update_contest_status(
         conn.commit()
     msg = "Đã xóa đề thi" if status == 'deleted' else f"Đề thi đã được {'mở' if status == 'active' else 'đóng'}"
     return {"message": msg}
+
+
+@router.put("/{contest_id}")
+def update_contest(
+    contest_id: int,
+    body: ContestUpdateRequest,
+    current_user: dict = Depends(get_current_teacher),
+):
+    updates = []
+    params = []
+    if body.title is not None:
+        updates.append("title = %s")
+        params.append(body.title)
+    if body.time_limit is not None:
+        updates.append("time_limit = %s")
+        params.append(body.time_limit)
+    if body.status is not None:
+        updates.append("status = %s")
+        params.append(body.status)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Không có trường nào để cập nhật")
+
+    query = f"UPDATE contests SET {', '.join(updates)} WHERE id = %s AND teacher_id = %s RETURNING id"
+    params.extend([contest_id, current_user["user_id"]])
+
+    with get_cursor() as (cur, conn):
+        cur.execute(query, params)
+        if not cur.fetchone():
+            raise HTTPException(status_code=403, detail="Không có quyền cập nhật đề thi này hoặc đề thi không tồn tại")
+        conn.commit()
+        
+    return {"message": "Cập nhật đề thi thành công"}
+

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
  totalSeconds: number;
@@ -8,19 +8,24 @@ interface Props {
 
 export default function ExamTimer({ totalSeconds, onExpire }: Props) {
  const [remaining, setRemaining] = useState(totalSeconds);
+ const expiredRef = useRef(false);
 
+ // Đếm ngược: chỉ giảm thời gian, không gọi callback trong updater (tránh setState
+ // khi đang render component khác).
  useEffect(() => {
- if (remaining <= 0) {
-  onExpire?.();
-  return;
- }
+ if (remaining <= 0) return;
  const interval = setInterval(() => {
-  setRemaining((prev) => {
-  if (prev <= 1) { onExpire?.(); return 0; }
-  return prev - 1;
-  });
+  setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
  }, 1000);
  return () => clearInterval(interval);
+ }, [remaining]);
+
+ // Báo hết giờ đúng một lần, sau khi render xong.
+ useEffect(() => {
+ if (remaining <= 0 && !expiredRef.current) {
+  expiredRef.current = true;
+  onExpire?.();
+ }
  }, [remaining, onExpire]);
 
  const mins = Math.floor(remaining / 60).toString().padStart(2, '0');

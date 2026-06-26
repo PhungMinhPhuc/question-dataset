@@ -20,7 +20,10 @@ ENGINE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "backend", "sr
 if ENGINE_PATH not in sys.path:
     sys.path.insert(0, ENGINE_PATH)
 
-IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", "./storage")
+# Ensure IMG_STORAGE_PATH uses an absolute path relative to project root
+# in case the server is started from a different working directory.
+_default_storage = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "storage"))
+IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", _default_storage)
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
@@ -80,7 +83,7 @@ def _run_job(job_id: str, file_path: str, job_dir: str,
             # IMG_STORAGE_PATH.
             img_dir = IMG_STORAGE_PATH
 
-        else:  # .tex
+        else:  # .tex or .txt
             final_tex = file_path
             img_dir = IMG_STORAGE_PATH
 
@@ -127,16 +130,16 @@ async def upload_tex(
     current_user: dict = Depends(get_current_teacher),
 ):
     """
-    Accept a .tex, .zip, or .docx file.
+    Accept a .tex, .txt, .zip, or .docx file.
 
     For .docx files with MathType equations the conversion can take several
     minutes (pix2tex OCR per equation).  The endpoint returns a job_id
     immediately; poll GET /upload/job/{job_id} for progress and result.
 
-    For .tex / .zip files the response is synchronous (fast).
+    For .tex / .txt / .zip files the response is synchronous (fast).
     """
-    if not file.filename.endswith((".tex", ".zip", ".docx")):
-        raise HTTPException(400, "Chỉ chấp nhận .tex, .zip hoặc .docx")
+    if not file.filename.endswith((".tex", ".txt", ".zip", ".docx")):
+        raise HTTPException(400, "Chỉ chấp nhận .tex, .txt, .zip hoặc .docx")
 
     os.makedirs(IMG_STORAGE_PATH, exist_ok=True)
 

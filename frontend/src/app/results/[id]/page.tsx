@@ -16,7 +16,7 @@ type Submission = {
  solution?: string;
 };
 type Result = {
- id: number; total_score: number; count_wrong_answers: number;
+ id: number; total_score: number; max_score?: number; count_wrong_answers: number;
  start_time: string; end_time: string; title: string; time_limit: number;
  contest_id: number; guest_name?: string; student_name?: string;
 };
@@ -194,7 +194,7 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
     
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', fontSize: '0.95rem' }}>
       <div><span style={{ color: 'var(--text-secondary)', display: 'inline-block', width: '150px' }}>Họ và tên:</span> <strong>{result?.student_name || result?.guest_name || 'Khách'}</strong></div>
-      <div><span style={{ color: 'var(--text-secondary)', display: 'inline-block', width: '150px' }}>Điểm:</span> <strong style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}>{result?.total_score?.toFixed(2)}/10</strong></div>
+      <div><span style={{ color: 'var(--text-secondary)', display: 'inline-block', width: '150px' }}>Điểm:</span> <strong style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}>{result?.total_score?.toFixed(2)}/{(result?.max_score ?? 10).toFixed(2)}</strong></div>
       <div style={{ height: '1px', background: 'var(--border)', margin: '0.5rem 0' }}></div>
       
       <div><span style={{ color: 'var(--text-secondary)', display: 'inline-block', width: '150px' }}>Thời gian làm bài:</span> <strong>{durationStr}</strong></div>
@@ -409,8 +409,8 @@ export default function ResultPage({ params }: { params: Promise<{ id: string }>
          {node.question_type === 'tf' && node.options && (
            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: sub.solution ? '1rem' : '0' }}>
             {node.options.map((opt: any, oi: number) => (
-             <div key={opt.id} style={{ display: 'flex', gap: '0.5rem' }}>
-              <strong>{String.fromCharCode(97 + oi)}) {opt.is_correct ? 'Đúng.' : 'Sai.'}</strong> 
+             <div key={opt.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
+              <strong style={{ flexShrink: 0 }}>{String.fromCharCode(97 + oi)}) {opt.is_correct ? 'Đúng.' : 'Sai.'}</strong>
               <div style={{ flex: 1, minWidth: 0 }}>{opt.explaination && <LatexRenderer content={opt.explaination} images={node.images} />}</div>
              </div>
             ))}

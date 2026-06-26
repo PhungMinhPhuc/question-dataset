@@ -300,8 +300,8 @@ export default function QuestionsPage() {
       {node.question_type === 'tf' && node.options && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: node.solution ? '1rem' : '0' }}>
          {node.options.map((opt: any, oi: number) => (
-          <div key={opt.id} style={{ display: 'flex', gap: '0.5rem' }}>
-           <strong>{String.fromCharCode(97 + oi)}) {opt.is_correct ? 'Đúng.' : 'Sai.'}</strong> 
+          <div key={opt.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
+           <strong style={{ flexShrink: 0 }}>{String.fromCharCode(97 + oi)}) {opt.is_correct ? 'Đúng.' : 'Sai.'}</strong>
            <div style={{ flex: 1, minWidth: 0 }}>{opt.explaination && <LatexRenderer content={opt.explaination} images={node.images} />}</div>
           </div>
          ))}

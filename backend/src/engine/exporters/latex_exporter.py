@@ -25,9 +25,14 @@ def replace_img_with_tikz(q: dict, options_tex: str = "", for_pdf_compilation: b
             if layout == 'immini_all' and options_tex:
                 text_content += "\n    " + options_tex
                 
-            opt_arg = "[]" if q_type == 'st' else "[thm]"
+            opt_arg = "[thm]"
             img_block = "\n".join(image_codes)
-            return f"\\immini{opt_arg}{{\n    {text_content}\n}}{{\n    {img_block}\n}}"
+            
+            result_immini = f"\\immini{opt_arg}{{\n    {text_content}\n}}{{\n    {img_block}\n}}"
+            if layout != 'immini_all' and options_tex:
+                result_immini += "\n    " + options_tex
+            
+            return result_immini
             
     # For normal images, wrap them in center with empty lines before and after
     def replacer(match):
@@ -42,10 +47,10 @@ def replace_img_with_tikz(q: dict, options_tex: str = "", for_pdf_compilation: b
 def replace_img_with_tikz_in_str(content: str, images: list, for_pdf_compilation: bool = False) -> str:
     def replacer(match):
         import urllib.parse
-        url = urllib.parse.unquote(match.group(1))
+        url = urllib.parse.unquote(match.group(1)).split('?')[0]
         scale_factor = 1
         for img in images:
-            if img.get('storage_path') == url:
+            if img.get('storage_path', '').split('?')[0] == url:
                 sc = img.get('img_scale')
                 if sc is not None:
                     try: scale_factor = float(sc)
@@ -74,6 +79,12 @@ def replace_img_with_tikz_in_str(content: str, images: list, for_pdf_compilation
         abs_path = os.path.abspath(local_path).replace('\\', '/')
         
         ext = os.path.splitext(abs_path)[1].lower()
+        if ext in ['.emf', '.wmf']:
+            if for_pdf_compilation:
+                return ""
+            else:
+                return f"\\includegraphics[scale={scale_factor:.2f}]{{{abs_path}}}"
+            
         if ext in ['.png', '.jpg', '.jpeg']:
             return f"\\includegraphics[width={scale_factor:.2f}\\textwidth]{{{abs_path}}}"
         else:
@@ -84,7 +95,12 @@ def render_options_and_solution_latex(q: dict, include_solution: bool = True, fo
     q_type = q.get('question_type')
     options = q.get('options', [])
     solution = q.get('solution', '') or ''
-    solution = replace_img_with_tikz_in_str(solution, q.get('images', []), for_pdf_compilation)
+    
+    def replacer_sol(match):
+        code = replace_img_with_tikz_in_str(match.group(0), q.get('images', []), for_pdf_compilation).strip()
+        return f"\n\n\\begin{{center}}\n{code}\n\\end{{center}}\n\n"
+        
+    solution = re.sub(r'!\[.*?\]\((.*?)\)', replacer_sol, solution)
     
     options_lines = []
     
@@ -126,6 +142,7 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
     
     # Calculate section counts
     total_mc = 0; total_tf = 0; total_sa = 0; total_oe = 0
+    cau_counter = 1
     for q in questions:
         if q.get('question_type') == 'mc': total_mc += 1
         elif q.get('question_type') == 'tf': total_tf += 1
@@ -136,10 +153,11 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
         # Default fallback
         if not exam_title: exam_title = contest.get('title', 'Đề thi')
             
+        extest_option = "solcolor" if include_solution else "dethi"
         header_tex = f"""\\documentclass[12pt, a4paper]{{article}}
 \\usepackage{{amsmath,amssymb,fancyhdr}}
 \\usepackage[top=1.2cm, bottom=2cm, left=1.5cm, right=1.2cm]{{geometry}}
-\\usepackage[solcolor]{{ex_test}}
+\\usepackage[{extest_option}]{{ex_test}}
 \\usepackage[utf8]{{vietnam}} 
 \\usepackage{{fontspec}}
 \\setmainfont{{Times New Roman}}
@@ -186,19 +204,25 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
 
 \\begin{{document}}
 \\begin{{center}}
-    \\noindent\\setstretch{{1.2}}{{
+    \\noindent\\setstretch{{1.2}}{{%
       %Trái
-      \\begin{{minipage}}[b]{{5cm}}
-      \\setstretch{{1.3}}\\centerline{{\\fontsize{{12}}{{0}}\\textbf{{{department}}}}}
-      \\centerline{{\\fontsize{{12}}{{0}} $\\overline{{\\text{{{exam_type}}}}}$}}
-      \\setstretch{{1.1}}\\centerline{{\\fontsize{{12}}{{0}}\\textit{{(Đề thi có 0\\pageref{{mylt}} trang)}}}}
-      \\end{{minipage}}\\hspace{{1cm}}
+      \\begin{{minipage}}[t]{{6.25cm}}
+      \\centering
+      \\setstretch{{1.1}}
+      \\textbf{{{department}}}\\\\
+      \\vspace{{0.1cm}}
+      $\\overline{{\\text{{{exam_type}}}}}$\\\\
+      \\vspace{{0.1cm}}
+      \\textit{{(Đề thi có 0\\pageref{{mylt}} trang)}}
+      \\end{{minipage}}\\hfill%
       %Phải
-      \\begin{{minipage}}[b]{{12cm}}
-      \\setstretch{{1.2}}\\centerline{{\\fontsize{{12}}{{0}}\\textbf{{{exam_title}}}}}
-      \\centerline{{\\fontsize{{12}}{{0}}\\textbf{{Môn thi: {subject}}}}}
-      \\centerline{{\\fontsize{{12}}{{0}}\\textit{{Thời gian \\underline{{làm bài: {duration} phút, không kể thời gian}} phát đề}}}}
-      \\end{{minipage}}\\\\
+      \\begin{{minipage}}[t]{{11.8cm}}
+      \\centering
+      \\setstretch{{1.1}}
+      \\textbf{{{exam_title}}}\\\\
+      \\textbf{{Môn thi: {subject}}}\\\\
+      \\textit{{Thời gian \\underline{{làm bài: {duration} phút, không kể thời gian}} phát đề}}
+      \\end{{minipage}}\\\\%
       %Họ tên
       \\begin{{minipage}}[b]{{11cm}}
       \\vspace{{12pt}}\\textbf{{Họ, tên thí sinh: }}{{\\small\\dotfill}}\\\\
@@ -212,7 +236,7 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
     }}
 \\end{{center}}
 \\rfoot{{Trang \\thepage/\\pageref{{mylt}} - Mã đề thi {code}}}
-\\setstretch{{1.15}}
+\\setstretch{{1.18}}
 """
         if general_info:
             gi_lines = general_info.strip().split('\n')
@@ -232,23 +256,41 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
     printed_sa = False
     printed_oe = False
     
+    cau_counter = 1
     for q in questions:
-        if q['id'] in processed_ids:
+        q_id = str(q.get('id', ''))
+        if q_id in processed_ids:
             continue
             
         q_type = q.get('question_type')
         if q_type == 'mc' and not printed_mc:
-            lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu {total_mc}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.}}\\par\n\\setcounter{{ex}}{{0}}")
+            if for_pdf_compilation:
+                lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu {total_mc}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.}}\\par\n\\setcounter{{ex}}{{0}}")
+            else:
+                lines.append("% Phần I")
             printed_mc = True
+            cau_counter = 1
         elif q_type == 'tf' and not printed_tf:
-            lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN II. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu {total_tf}. Trong mỗi ý a), b), c), d) ở mỗi câu hỏi, thí sinh chọn đúng hoặc sai.}}\\par\n\\setcounter{{ex}}{{0}}")
+            if for_pdf_compilation:
+                lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN II. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu {total_tf}. Trong mỗi ý a), b), c), d) ở mỗi câu hỏi, thí sinh chọn đúng hoặc sai.}}\\par\n\\setcounter{{ex}}{{0}}")
+            else:
+                lines.append("% Phần II")
             printed_tf = True
+            cau_counter = 1
         elif q_type == 'sa' and not printed_sa:
-            lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN III. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu {total_sa}.}}\\par\n\\setcounter{{ex}}{{0}}")
+            if for_pdf_compilation:
+                lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN III. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu {total_sa}.}}\\par\n\\setcounter{{ex}}{{0}}")
+            else:
+                lines.append("% Phần III")
             printed_sa = True
+            cau_counter = 1
         elif q_type == 'oe' and not printed_oe:
-            lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN IV. Câu tự luận. Thí sinh trả lời từ câu 1 đến câu {total_oe}.}}\\par\n\\setcounter{{ex}}{{0}}")
+            if for_pdf_compilation:
+                lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN IV. Câu tự luận. Thí sinh trả lời từ câu 1 đến câu {total_oe}.}}\\par\n\\setcounter{{ex}}{{0}}")
+            else:
+                lines.append("% Phần IV")
             printed_oe = True
+            cau_counter = 1
             
         # Also handle stimulus type which can contain MC/TF/SA
         if q_type == 'st':
@@ -256,19 +298,39 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
             if children:
                 child_type = children[0].get('question_type')
                 if child_type == 'mc' and not printed_mc:
-                    lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu {total_mc}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    if for_pdf_compilation:
+                        lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu {total_mc}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    else:
+                        lines.append("% Phần I")
                     printed_mc = True
+                    cau_counter = 1
                 elif child_type == 'tf' and not printed_tf:
-                    lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN II. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu {total_tf}. Trong mỗi ý a), b), c), d) ở mỗi câu hỏi, thí sinh chọn đúng hoặc sai.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    if for_pdf_compilation:
+                        lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN II. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu {total_tf}. Trong mỗi ý a), b), c), d) ở mỗi câu hỏi, thí sinh chọn đúng hoặc sai.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    else:
+                        lines.append("% Phần II")
                     printed_tf = True
+                    cau_counter = 1
                 elif child_type == 'sa' and not printed_sa:
-                    lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN III. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu {total_sa}.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    if for_pdf_compilation:
+                        lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN III. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu {total_sa}.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    else:
+                        lines.append("% Phần III")
                     printed_sa = True
+                    cau_counter = 1
                 elif child_type == 'oe' and not printed_oe:
-                    lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN IV. Câu tự luận. Thí sinh trả lời từ câu 1 đến câu {total_oe}.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    if for_pdf_compilation:
+                        lines.append(f"\\par\\addvspace{{5pt}}\\noindent\\textbf{{PHẦN IV. Câu tự luận. Thí sinh trả lời từ câu 1 đến câu {total_oe}.}}\\par\n\\setcounter{{ex}}{{0}}")
+                    else:
+                        lines.append("% Phần IV")
                     printed_oe = True
+                    cau_counter = 1
 
-            if use_minipage: lines.append("\\par\\noindent\\begin{minipage}{\\linewidth}")
+            if for_pdf_compilation:
+                lines.append("\\par\\addvspace{8pt}")
+                if use_minipage: lines.append("\\noindent\\begin{minipage}[t]{\\linewidth}")
+            if not for_pdf_compilation:
+                lines.append(f"% Câu {cau_counter}")
             lines.append("\\begin{ex}")
             content = replace_img_with_tikz(q, "", for_pdf_compilation)
             lines.append(f"\\sochc{{{len(children)}}}{{{content}}}")
@@ -280,27 +342,138 @@ def get_raw_latex(contest: dict, questions: List[dict], include_header: bool = T
                 if solution_tex:
                     lines.append("        " + solution_tex)
                 lines.append("    \\end{chc}")
-                processed_ids.add(child['id'])
+                child_id = str(child.get('id', ''))
+                processed_ids.add(child_id)
                 
             lines.append("\\end{ex}\n")
-            if use_minipage: lines.append("\\end{minipage}\\par\\vspace{1ex}\n")
-            processed_ids.add(q['id'])
+            if for_pdf_compilation:
+                if use_minipage: lines.append("\\end{minipage}")
+                lines.append("\\par\\addvspace{2pt}\n")
+            processed_ids.add(str(q.get('id', '')))
+            if q.get('question_type') == 'st':
+                cau_counter += len([c for c in questions if c.get('parent_id') == q['id']])
+            else:
+                cau_counter += 1
             
         elif not q.get('parent_id'): # single question
-            if use_minipage: lines.append("\\par\\noindent\\begin{minipage}{\\linewidth}")
+            if for_pdf_compilation:
+                lines.append("\\par\\addvspace{8pt}")
+                if use_minipage: lines.append("\\noindent\\begin{minipage}[t]{\\linewidth}")
+            if not for_pdf_compilation:
+                lines.append(f"% Câu {cau_counter}")
             lines.append("\\begin{ex}")
             options_tex, solution_tex = render_options_and_solution_latex(q, include_solution, for_pdf_compilation)
             lines.append("    " + replace_img_with_tikz(q, options_tex, for_pdf_compilation))
             if solution_tex:
                 lines.append("    " + solution_tex)
             lines.append("\\end{ex}\n")
-            if use_minipage: lines.append("\\end{minipage}\\par\\vspace{1ex}\n")
-            processed_ids.add(q['id'])
+            if for_pdf_compilation:
+                if use_minipage: lines.append("\\end{minipage}")
+                lines.append("\\par\\addvspace{2pt}\n")
+            processed_ids.add(str(q.get('id', '')))
+            if q.get('question_type') == 'st':
+                cau_counter += len([c for c in questions if c.get('parent_id') == q['id']])
+            else:
+                cau_counter += 1
 
     if include_header:
         lines.append("\\centerline{\\textbf{-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt- HẾT -\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-\\kern0pt-}}")
         lines.append("\\label{mylt}")
         lines.append("\\end{document}")
+    raw = "\n".join(lines)
+    from .common import balance_latex_braces
+    return balance_latex_braces(raw)
+
+
+def get_combined_latex(contest: dict, codes_data: list, exam_title: str = "", general_info: str = "", department: str = "", exam_type: str = "", subject: str = "", duration: int = 50, for_pdf_compilation: bool = True, use_minipage: bool = True) -> str:
+    """Gộp nhiều mã đề (đề đảo) vào MỘT document để compile 1 lần.
+
+    codes_data: list các tuple (code, questions). Mỗi mã là một block riêng:
+    sang trang mới, reset số trang về 1, và dùng nhãn trang riêng (mylt<idx>) để
+    header/footer hiện đúng số trang của từng mã. Tái dùng get_raw_latex để giữ
+    nguyên cách trình bày, chỉ ghép preamble 1 lần + nhiều block thân đề.
+    """
+    preamble = None
+    blocks = []
+    for idx, (code, questions) in enumerate(codes_data):
+        full = get_raw_latex(
+            contest, questions,
+            include_header=True,
+            use_minipage=use_minipage,
+            exam_title=exam_title,
+            general_info=general_info,
+            code=code,
+            department=department,
+            exam_type=exam_type,
+            subject=subject,
+            duration=duration,
+            include_solution=False,
+            for_pdf_compilation=for_pdf_compilation,
+        )
+        pre, _, after = full.partition("\\begin{document}")
+        body = after.rpartition("\\end{document}")[0]
+        if preamble is None:
+            preamble = pre
+        # Nhãn trang riêng cho từng mã (header/footer/\label dùng chung tên 'mylt')
+        body = body.replace("mylt", f"mylt{idx}")
+        # Mỗi mã: sang trang mới + reset số trang về 1 -> đếm trang đúng theo từng mã
+        blocks.append("\\clearpage\\setcounter{page}{1}%\n" + body)
+
+    combined = (preamble or "") + "\\begin{document}\n" + "\n".join(blocks) + "\n\\end{document}\n"
+    return combined
+
+
+def get_measure_latex(contest: dict, questions: List[dict], exam_title: str = "", general_info: str = "", department: str = "", exam_type: str = "", subject: str = "", duration: int = 50) -> str:
+    """Dựng document đo CHIỀU CAO THẬT từng câu: đóng mỗi câu vào \\vbox rồi ghi
+    ht+dp ra file heights.txt (dạng '<id>=<pt>'). Compile 1 lượt là có số đo.
+    """
+    from .common import group_units
+    # Preamble (dethi) lấy từ một bản render đầy đủ
+    sample = get_raw_latex(
+        contest, questions, include_header=True, use_minipage=False,
+        exam_title=exam_title, general_info=general_info, code="000",
+        department=department, exam_type=exam_type, subject=subject,
+        duration=duration, include_solution=False, for_pdf_compilation=True,
+    )
+    preamble = sample.split("\\begin{document}")[0]
+
+    lines = [preamble, "\\begin{document}", "\\newwrite\\hgtfile", "\\immediate\\openout\\hgtfile=heights.txt"]
+
+    # Đo chiều cao TRANG thật + HEADER đề + từng tiêu đề PHẦN để model khớp thực tế.
+    lines.append("\\immediate\\write\\hgtfile{__PAGE__=\\the\\textheight}")
+    after_doc = sample.split("\\begin{document}", 1)[1] if "\\begin{document}" in sample else ""
+    mfirst = re.search(r'\\par\\addvspace\{5pt\}\\noindent\\textbf\{PHẦN', after_doc)
+    hdr_block = after_doc[:mfirst.start()] if mfirst else ""
+    if hdr_block.strip():
+        lines.append("\\setbox0=\\vbox{\\hsize=\\linewidth\\relax " + hdr_block + "}")
+        lines.append("\\immediate\\write\\hgtfile{__EXAMHDR__=\\the\\dimexpr\\ht0+\\dp0\\relax}")
+    for hdr in re.findall(r'\\noindent\\textbf\{(PHẦN[^}]*)\}', sample):
+        if 'nhiều phương án' in hdr:
+            t = 'mc'
+        elif 'đúng sai' in hdr:
+            t = 'tf'
+        elif 'trả lời ngắn' in hdr:
+            t = 'sa'
+        elif 'tự luận' in hdr:
+            t = 'oe'
+        else:
+            continue
+        lines.append("\\setbox0=\\vbox{\\hsize=\\linewidth\\relax \\noindent\\textbf{" + hdr + "}\\par}")
+        lines.append("\\immediate\\write\\hgtfile{__PART_" + t + "__=\\the\\dimexpr\\ht0+\\dp0\\relax}")
+
+    for unit in group_units(questions):
+        top_id = unit[0].get('id')
+        body = get_raw_latex(
+            contest, unit, include_header=False, use_minipage=False,
+            include_solution=False, for_pdf_compilation=True,
+        )
+        s = body.find("\\begin{ex}")
+        e = body.rfind("\\end{ex}")
+        block = body[s:e + len("\\end{ex}")] if (s >= 0 and e >= 0) else body
+        lines.append("\\setbox0=\\vbox{\\hsize=\\linewidth\\relax " + block + "}")
+        lines.append("\\immediate\\write\\hgtfile{" + str(top_id) + "=\\the\\dimexpr\\ht0+\\dp0\\relax}")
+    lines.append("\\immediate\\closeout\\hgtfile")
+    lines.append("\\end{document}\n")
     return "\n".join(lines)
 
 

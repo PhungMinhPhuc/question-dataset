@@ -105,6 +105,11 @@ class ContestCreateRequest(BaseModel):
     question_ids: List[int]
     status: str = "inactive"
 
+class ContestUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    time_limit: Optional[int] = None
+    status: Optional[str] = None
+
 class RandomContestRequest(BaseModel):
     class_id: Optional[int] = None
     title: str

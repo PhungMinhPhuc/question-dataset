@@ -57,10 +57,21 @@ def run_parser(file_path, teacher_id, subject, grade, chapter, lesson, complexit
     if doc_match:
         content = doc_match.group(1)
 
-    # Xóa comment %
+    # Tách riêng các khối tikzpicture để không bị xóa comment bên trong
+    tikz_blocks = []
+    def save_tikz(match):
+        tikz_blocks.append(match.group(0))
+        return f"__TIKZ_BLOCK_{len(tikz_blocks)-1}__"
+
+    content = re.sub(r'\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}', save_tikz, content, flags=re.DOTALL)
+
+    # Xóa comment % ở những phần còn lại
     # Fix: Chỉ xóa % khi không phải \% (escape) và không phải \d% (ví dụ: 50%)
-    # Lookbehind: không xóa nếu đứng trước là \ (tức là \%) hoặc là chữ số
     content = re.sub(r'(?<!\\)(?<!\d)(?<!\\\\)%[^\n]*', '', content)
+
+    # Phục hồi các khối tikzpicture
+    for i, block in enumerate(tikz_blocks):
+        content = content.replace(f"__TIKZ_BLOCK_{i}__", block)
 
     # Thay thế các lệnh \heva và \hoac
     content = replace_math_macros(content)

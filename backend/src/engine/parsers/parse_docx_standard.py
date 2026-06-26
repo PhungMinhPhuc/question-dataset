@@ -109,6 +109,12 @@ def process_standard_to_btpro(tex_content):
     # Pattern allows one level of nested braces (e.g. \text{...}, subscripts) in content.
     _inner = r'(?:[^{}]|\{[^{}]*\})+'
     
+    # Ensure option label dots are inside the formatting wrappers so they are 
+    # correctly matched by label regexes (e.g. \textbf{\ul{C}.} -> \textbf{\ul{C.}})
+    tex_content = re.sub(r'([A-D])\}\.', r'\1.}', tex_content)
+    tex_content = re.sub(r'([A-D])\}\}\.', r'\1.}}', tex_content)
+    tex_content = re.sub(r'([A-D])\}\}\}\.', r'\1.}}}', tex_content)
+
     # 1. Handle \textcolor{...}{...} (often red for correct answers)
     tex_content = re.sub(r'\\textcolor\{[^}]+\}\{\\textbf\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
     tex_content = re.sub(r'\\textbf\{\\textcolor\{[^}]+\}\{([A-D])\.\s*(' + _inner + r')\}\}', r'__TRUE__\1. \2', tex_content)
@@ -118,22 +124,43 @@ def process_standard_to_btpro(tex_content):
     tex_content = re.sub(r'\\textbf\{\\textcolor\{[^}]+\}\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
     tex_content = re.sub(r'\\textcolor\{[^}]+\}\{([A-D])\}\.?\}', r'__TRUE__\1.', tex_content)
 
-    # 2. Handle \ul / \underline / \hl with a brace-aware pass. A wrapper whose inner
-    # text (ignoring \textbf) starts with an option label "A." … "D." marks the correct
-    # answer (→ __TRUE__); anything else (an underlined word in the stem, a highlighted
-    # phrase, or option content highlighted without a label) is kept for display. This
-    # replaces a fragile zoo of fixed-shape regexes that broke on nestings such as
-    # \hl{\textbf{B.} content} (the inner \textbf{B.} used to be rewritten to __OPT__
-    # *inside* the \hl{…}, splitting its braces and leaking "\hl{} {content}").
+    # 2. Handle \ul / \underline / \hl with a brace-aware pass.
     tex_content = _mark_emphasis_answers(tex_content)
 
     # Normal options
-    tex_content = re.sub(r'\\textbf\{([A-D])\.\s*(' + _inner + r')\}', r'__OPT__\1. \2', tex_content)
+    def replace_opt(m):
+        tok = m.group(1)
+        if not tok.startswith('__'):
+            tok = '__OPT__' + tok
+        return tok + '. ' + m.group(2)
+        
+    tex_content = re.sub(r'\\textbf\{(__(?:OPT|TRUE)__[A-D]|[A-D])\.\s*(' + _inner + r')\}', replace_opt, tex_content)
     tex_content = re.sub(r'\\textbf\{([A-D])\.\}', r'__OPT__\1.', tex_content)
     tex_content = re.sub(r'\\textbf\{([A-D])\}\.', r'__OPT__\1.', tex_content)
 
     # True/False options clean up (a), b), c), d))
-    tex_content = re.sub(r'\\textbf\{([a-d])\)\}', r'__TF__\1)', tex_content)
+    # Ensure option label parentheses are inside the formatting wrappers
+    tex_content = re.sub(r'([a-d])\}\)', r'\1)}', tex_content)
+    tex_content = re.sub(r'([a-d])\}\}\)', r'\1))}', tex_content)
+    tex_content = re.sub(r'([a-d])\}\}\}\)', r'\1)))}', tex_content)
+
+    # Inject __TF__ or __TRUE__ ONLY if wrapped in formatting! This prevents matching b) in (2a - b)
+    tex_content = re.sub(r'\\(?:textbf|textit|emph)\{([a-d])\)\}', r'__TF__\1)', tex_content)
+    tex_content = re.sub(r'\\(?:ul|underline|hl)\{([a-d])\)\}', r'__TRUE__\1)', tex_content)
+    tex_content = re.sub(r'\\textcolor\{[^}]+\}\{([a-d])\)\}', r'__TRUE__\1)', tex_content)
+    
+    # Strip any formatting wrappers that wrap exactly the token.
+    # If the True/False option label is highlighted/underlined/colored, it means the statement is TRUE.
+    for _ in range(3):
+        tex_content = re.sub(r'\\(?:textbf|textit|emph|ul|underline|hl)\{__(TRUE|OPT)__([A-D])\.\}', r'__\1__\2.', tex_content)
+        tex_content = re.sub(r'\\textcolor\{[^}]+\}\{__(TRUE|OPT)__([A-D])\.\}', r'__\1__\2.', tex_content)
+
+        tex_content = re.sub(r'\\(?:textbf|textit|emph)\{__TF__([a-d])\)\}', r'__TF__\1)', tex_content)
+        tex_content = re.sub(r'\\(?:ul|underline|hl)\{__TF__([a-d])\)\}', r'__TRUE__\1)', tex_content)
+        tex_content = re.sub(r'\\textcolor\{[^}]+\}\{__TF__([a-d])\)\}', r'__TRUE__\1)', tex_content)
+
+        tex_content = re.sub(r'\\(?:textbf|textit|emph|ul|underline|hl)\{__TRUE__([a-d])\)\}', r'__TRUE__\1)', tex_content)
+        tex_content = re.sub(r'\\textcolor\{[^}]+\}\{__TRUE__([a-d])\)\}', r'__TRUE__\1)', tex_content)
     
     # Split by questions. Accept both the bold form (\textbf{Câu 1.}) and the plain
     # form (a line starting with "Câu 1." / "Câu 1:") so files that don't bold the
@@ -202,35 +229,48 @@ def process_standard_to_btpro(tex_content):
         is_short_answer = False
         short_answer_val = ""
         # Check Short Answer
-        sa_match = re.search(r'(?:Đáp án|Trả lời ngắn)\s*:\s*([^\n]+)', main_part + "\n" + solution_part, flags=re.IGNORECASE)
+        sa_match = re.search(r'(?:Đáp án|Trả lời ngắn|Trả lời)\s*:\s*([^\n]+)', main_part + "\n" + solution_part, flags=re.IGNORECASE)
         if sa_match:
             is_short_answer = True
             short_answer_val = sa_match.group(1).strip()
             
-        # Check True False (look for __TF__a) or just a) )
+        # Check True False
         is_true_false = False
-        if not is_short_answer and (re.search(r'__TF__[a-d]\)', main_part) or re.search(r'(?:\n|^|\s+)([a-d])\)', main_part)):
-            is_true_false = True
+        if not is_short_answer and '__OPT__' not in main_part:
+            if '__TF__' in main_part or '__TRUE__' in main_part:
+                is_true_false = True
+            else:
+                has_a = re.search(r'(?:\n|^)\s*a\)', main_part)
+                has_b = re.search(r'(?:\n|^)\s*b\)', main_part)
+                has_c = re.search(r'(?:\n|^)\s*c\)', main_part)
+                if has_a and has_b and has_c:
+                    is_true_false = True
 
         if is_short_answer:
-            # Xóa dòng Đáp án: khỏi main_part
-            main_part = re.sub(r'(?:Đáp án|Trả lời ngắn)\s*:\s*[^\n]+', '', main_part, flags=re.IGNORECASE).strip()
+            # Xóa dòng Đáp án: khỏi main_part và solution_part
+            main_part = re.sub(r'(?:Đáp án|Trả lời ngắn|Trả lời)\s*:\s*[^\n]+', '', main_part, flags=re.IGNORECASE).strip()
+            solution_part = re.sub(r'(?:Đáp án|Trả lời ngắn|Trả lời)\s*:\s*[^\n]+', '', solution_part, flags=re.IGNORECASE).strip()
             final_tex += f"\\begin{{ex}}\n{main_part}\n\\shortans{{{short_answer_val}}}\n"
 
         elif is_true_false:
             # Replace raw a) with __TF__a) if not already
-            if not '__TF__' in main_part:
-                main_part = re.sub(r'(?:\n|^|\s+)([a-d])\)', r'\n__TF__\1)', main_part)
+            if not '__TF__' in main_part and not '__TRUE__' in main_part:
+                main_part = re.sub(r'(?:\n|^)\s*([a-d])\)', r'\n__TF__\1)', main_part)
                 
-            opts_split = re.split(r'__TF__([a-d])\)', main_part)
+            opts_split = re.split(r'__(TF|TRUE)__([a-d])\)', main_part)
             question_text = opts_split[0].strip()
             
             options_dict = {}
             correct_set = set()
             i = 1
-            while i < len(opts_split) - 1:
-                letter = opts_split[i].lower()
-                content = opts_split[i+1].strip() if i+1 < len(opts_split) else ""
+            while i < len(opts_split) - 2:
+                is_true = opts_split[i] == 'TRUE'
+                letter = opts_split[i+1].lower()
+                content = opts_split[i+2].strip() if i+2 < len(opts_split) else ""
+                
+                if is_true:
+                    correct_set.add(letter)
+
                 # A highlighted/underlined/coloured statement is the one marked Đúng
                 # (True); the rest stay Sai (False). Unwrap the emphasis for clean display.
                 if re.search(r'\\(?:hl|underline|ul)\{', content) or re.search(r'\\textcolor\{', content):
@@ -239,7 +279,7 @@ def process_standard_to_btpro(tex_content):
                     content = re.sub(r'\\textcolor\{[^}]+\}\{((?:[^{}\\]|\\.)*)\}', r'\1', content)
                     content = content.strip()
                 options_dict[letter] = content
-                i += 2
+                i += 3
 
             final_tex += f"\\begin{{ex}}\n{question_text}\n\\choiceTF\n"
             for letter in ['a', 'b', 'c', 'd']:
@@ -290,13 +330,17 @@ def process_standard_to_btpro(tex_content):
                 if match:
                     correct_ans = match.group(1).upper()
                     
-            final_tex += f"\\begin{{ex}}\n{question_text}\n\\choice\n"
-            for letter in ['A', 'B', 'C', 'D']:
-                if letter in options_dict:
-                    prefix = "\\True " if letter == correct_ans else ""
-                    final_tex += f"{{{prefix}{options_dict[letter]}}}\n"
-                else:
-                    final_tex += "{}\n"
+            if not options_dict:
+                # Không tìm thấy bất kỳ đáp án A, B, C, D nào -> Tự luận
+                final_tex += f"\\begin{{ex}}\n{question_text}\n"
+            else:
+                final_tex += f"\\begin{{ex}}\n{question_text}\n\\choice\n"
+                for letter in ['A', 'B', 'C', 'D']:
+                    if letter in options_dict:
+                        prefix = "\\True " if letter == correct_ans else ""
+                        final_tex += f"{{{prefix}{options_dict[letter]}}}\n"
+                    else:
+                        final_tex += "{}\n"
                 
         if solution_part.strip():
             cleaned_solution = re.sub(r'\.?\s*Chọn\s+[A-D]\s*', '', solution_part, flags=re.IGNORECASE).strip()

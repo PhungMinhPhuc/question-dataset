@@ -162,16 +162,17 @@ export default function UploadPage() {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
-    if (f && (f.name.endsWith(".tex") || f.name.endsWith(".zip") || f.name.endsWith(".docx"))) setFile(f);
+    if (f && (f.name.endsWith(".tex") || f.name.endsWith(".txt") || f.name.endsWith(".zip") || f.name.endsWith(".docx"))) setFile(f);
   };
 
-  const handleParse = async () => {
-    if (!file || !user) return;
+  const handleParse = async (overrideFile?: File) => {
+    const targetFile = overrideFile || file;
+    if (!targetFile || !user) return;
     setLoading(true);
     setError("");
     setPreview([]);
     const fd = new FormData();
-    fd.append("file", file);
+    fd.append("file", targetFile);
     fd.append("teacher_id", String(user.user_id));
     fd.append("subject", subject);
     fd.append("grade", grade);
@@ -190,6 +191,34 @@ export default function UploadPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get("source") === "ai") {
+        const aiData = localStorage.getItem("ai_normalized_questions");
+        if (aiData) {
+          try {
+            const parsed = JSON.parse(aiData);
+            const questionsArr = parsed.questions || parsed; 
+            if (Array.isArray(questionsArr) && questionsArr.length > 0) {
+              const texContent = questionsArr.map((q: any) => q.latex_code || "").join("\n\n");
+              const aiFile = new File([texContent], "ai_normalized.tex", { type: "text/plain" });
+              setFile(aiFile);
+              
+              // Tự động gọi parse với file AI thay vì dùng click
+              handleParse(aiFile);
+            } else {
+              setError("Không tìm thấy câu hỏi từ dữ liệu AI.");
+            }
+          } catch (e) {
+            setError("Lỗi khi đọc dữ liệu từ AI.");
+          }
+          localStorage.removeItem("ai_normalized_questions");
+        }
+      }
+    }
+  }, [user, subject, grade, chapter, complexity]);
 
   const updateItem = (idx: number, key: string, val: unknown) => {
     setPreview((prev) => {
@@ -291,7 +320,7 @@ export default function UploadPage() {
           <div>
             <h1 className="page-title">Upload câu hỏi LaTeX</h1>
             <p className="page-sub">
-              Upload file .tex hoặc .zip chứa câu hỏi định dạng LaTeX chuẩn
+              Upload file .tex, .txt hoặc .zip chứa câu hỏi định dạng LaTeX chuẩn
             </p>
           </div>
         </div>
@@ -317,7 +346,7 @@ export default function UploadPage() {
                 <div className="upload-text">
                   Kéo thả hoặc click để chọn file
                 </div>
-                <div className="upload-sub">Hỗ trợ: .tex, .zip, .docx</div>
+                <div className="upload-sub">Hỗ trợ: .tex, .txt, .zip, .docx</div>
                 {file && (
                   <div
                     style={{
@@ -333,16 +362,17 @@ export default function UploadPage() {
               <input
                 ref={fileRef}
                 type="file"
-                accept=".tex,.zip,.docx"
+                accept=".tex,.txt,.zip,.docx"
                 style={{ display: "none" }}
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
             </div>
 
             <button
+              id="btn-parse-preview"
               className="btn btn-primary btn-block btn-lg"
               style={{ marginTop: "1rem" }}
-              onClick={handleParse}
+              onClick={() => handleParse()}
               disabled={!file || loading}
             >
               {loading ? (
@@ -890,9 +920,9 @@ export default function UploadPage() {
                             {options.map((opt: any, oi: number) => (
                               <div
                                 key={oi}
-                                style={{ display: "flex", gap: "0.5rem" }}
+                                style={{ display: "flex", gap: "0.5rem", alignItems: "baseline" }}
                               >
-                                <strong>
+                                <strong style={{ flexShrink: 0 }}>
                                   {String.fromCharCode(97 + oi)}){" "}
                                   {opt.is_correct ? "Đúng." : "Sai."}
                                 </strong>

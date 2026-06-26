@@ -479,7 +479,8 @@ async def edit_image(
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
-    img_storage = os.path.abspath(os.getenv("IMG_STORAGE_PATH", "./storage"))
+    _default_storage = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "storage"))
+    img_storage = os.path.abspath(os.getenv("IMG_STORAGE_PATH", _default_storage))
     safe = os.path.normpath(img_path.lstrip("/\\"))
     dest = os.path.abspath(os.path.join(img_storage, safe))
     if not dest.startswith(img_storage + os.sep):

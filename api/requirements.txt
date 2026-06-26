@@ -7,3 +7,8 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.9
 aiofiles==23.2.1
 openpyxl
+pypdf
+
+ultralytics
+doclayout-yolo
+pymupdf

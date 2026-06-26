@@ -91,8 +91,23 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
 
  let extractedImages: string[] = [];
 
+ // Khắc phục nội dung bị pandoc escape khi import từ Word (\textbackslash, \{, \}...).
+ // Chỉ chạy khi có dấu hiệu lỗi để KHÔNG ảnh hưởng nội dung đúng (vd \{ \} hợp lệ).
+ let source = content;
+ if (source.includes('\\textbackslash') || source.includes('\\textbraceleft')) {
+  source = source
+   .replace(/\\textbackslash\\textbackslash(?:\{\})?/g, '\\\\')
+   .replace(/\\textbackslash\s?/g, '\\')
+   .replace(/\\textbraceleft\s?/g, '{')
+   .replace(/\\textbraceright\s?/g, '}')
+   .replace(/\\textbar(?:\{\})?\s?/g, '\\vert ')
+   .replace(/\\\{/g, '{')
+   .replace(/\\\}/g, '}')
+   .replace(/\\\^\{\}/g, '^');
+ }
+
  // Convert markdown image syntax ![alt](src) to HTML <img> tags
- let cleaned = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
+ let cleaned = source.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
   // Normalize path: ensure it starts with / for API serving
   let imgSrc = src.replace(/\\\\/g, '/');
   if (!imgSrc.startsWith('http')) {
@@ -142,7 +157,7 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
   .replace(/\\includegraphics\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g, '');
 
  // Convert tabular to HTML table
- cleaned = cleaned.replace(/\\begin\{(tabular|tabularx|longtable|array)\}(?:\[[^\]]*\])?(?:\{[^}]*\})*([\s\S]*?)\\end\{\1\}/g, (match, envName, tableContent) => {
+ cleaned = cleaned.replace(/\\begin\{(tabular|tabularx|longtable)\}(?:\[[^\]]*\])?(?:\{[^}]*\})*([\s\S]*?)\\end\{\1\}/g, (match, envName, tableContent) => {
   let html = '<div style="overflow-x: auto; margin: 1rem 0;"><table style="border-collapse: collapse; width: 100%; font-size: 0.9em;">';
   const rows = tableContent.split(/\\\\/);
   rows.forEach((row: string) => {
@@ -191,17 +206,22 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
   return html;
  });
 
-  const parts = cleaned.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g);
+  // Remove excessive blank lines around block math to prevent huge gaps
+  cleaned = cleaned.replace(/\n{2,}(\$\$|\\\[)/g, '\n$1');
+  cleaned = cleaned.replace(/(\$\$|\\\])\n{2,}/g, '$1\n');
+
+  const parts = cleaned.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g);
   
   cleaned = parts.map(part => {
     // Nếu là display math
-    if (part.startsWith('$$') && part.endsWith('$$')) return part;
+    if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('\\[') && part.endsWith('\\]'))) return part;
     
     // Nếu là inline math
-    if (part.startsWith('$') && part.endsWith('$')) {
-      const inner = part.slice(1, -1);
+    if ((part.startsWith('$') && part.endsWith('$')) || (part.startsWith('\\(') && part.endsWith('\\)'))) {
+      const isParen = part.startsWith('\\(');
+      const inner = isParen ? part.slice(2, -2) : part.slice(1, -1);
       if (!inner.includes('\\displaystyle')) {
-        return `$\\displaystyle ${inner}$`;
+        return isParen ? `\\(\\displaystyle ${inner}\\)` : `$\\displaystyle ${inner}$`;
       }
       return part;
     }
@@ -212,12 +232,17 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
       .replace(/(?<!\n)\n(?!\n)/g, ' ') // single \n is just a space (standard LaTeX behavior)
       .replace(/\\newline/g, '<br/>')
       .replace(/\\\\/g, '<br/>')
+      .replace(/\\subsubsection\*?\{([^}]+)\}/g, '<br/><strong>$1</strong><br/>')
+      .replace(/\\subsection\*?\{([^}]+)\}/g, '<br/><strong style="font-size: 1.1em;">$1</strong><br/>')
+      .replace(/\\section\*?\{([^}]+)\}/g, '<br/><strong style="font-size: 1.2em;">$1</strong><br/>')
       .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
       .replace(/\\underline\{([^}]+)\}/g, '<u>$1</u>')
       .replace(/\\ul\{([^}]+)\}/g, '<u>$1</u>')
       .replace(/\\hl\{([^}]+)\}/g, '<mark style="background:#fff3a3; padding:0 .15em; border-radius:2px;">$1</mark>')
       .replace(/\\text\{([^}]+)\}/g, '$1')
+      .replace(/\n- (.*?)(?=\n|$)/g, '<br/>• $1')
       // \vert is a math command; in plain text (an option ending with "|") it would
       // show up literally as "\vert" — render it as the vertical bar it stands for.
       .replace(/\\vert\b\s?/g, '|')
@@ -229,7 +254,12 @@ export default function LatexRenderer({ content, className = '', layoutType = 'n
       .replace(/\\hspace\*?\{[^}]*\}/g, ' ')
       .replace(/\\vspace\*?\{[^}]*\}/g, '')
       .replace(/\\noindent/g, '')
-      .replace(/\\medskip|\\bigskip|\\smallskip/g, '<br/>');
+      .replace(/\\medskip|\\bigskip|\\smallskip/g, '<br/>')
+      .replace(/\\displaystyle\s*/g, '')
+      .replace(/\\quad/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+      .replace(/\\qquad/g, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')
+      .replace(/\\hfil/g, '&nbsp;&nbsp;')
+      .replace(/\\hfill/g, '&nbsp;&nbsp;');
   }).join('');
 
   if (layoutType.startsWith('immini') && extractedImages.length > 0) {

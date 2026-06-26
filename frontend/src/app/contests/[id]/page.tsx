@@ -8,6 +8,7 @@ import LatexRenderer from '@/components/LatexRenderer';
 import api from '@/lib/api';
 import Link from 'next/link';
 import { QuestionEditor, QuestionDetail } from '@/components/QuestionEditor';
+import ExportContestModal from '@/components/ExportContestModal';
 
 type QuestionInContest = {
   id: number;
@@ -72,6 +73,9 @@ export default function ContestDetailPage({ params }: { params: Promise<{ id: st
   const [toggling, setToggling] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showSubmissions, setShowSubmissions] = useState(false);
+  const [showEditContestModal, setShowEditContestModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [editContestData, setEditContestData] = useState({ title: '', time_limit: 0 });
   const [detailModal, setDetailModal] = useState<{ question: QuestionDetail; saving: boolean; error: string; displayNumStr: string } | null>(null);
   const [subjects, setSubjects] = useState<Record<string, unknown>>({});
 
@@ -108,6 +112,23 @@ export default function ContestDetailPage({ params }: { params: Promise<{ id: st
       setError(e instanceof Error ? e.message : 'Lỗi cập nhật trạng thái');
     } finally {
       setToggling(false);
+    }
+  };
+
+  const handleOpenEditContest = () => {
+    if (!contest) return;
+    setEditContestData({ title: contest.title, time_limit: contest.time_limit });
+    setShowEditContestModal(true);
+  };
+
+  const handleSaveContest = async () => {
+    if (!contest) return;
+    try {
+      await api.updateContest(contest.id, editContestData);
+      setContest({ ...contest, title: editContestData.title, time_limit: editContestData.time_limit });
+      setShowEditContestModal(false);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Lỗi cập nhật đề thi');
     }
   };
 
@@ -251,6 +272,12 @@ export default function ContestDetailPage({ params }: { params: Promise<{ id: st
             <Link href={`/exam/${contestId}`} className="btn btn-ghost btn-sm" target="_blank">
               Xem trước
             </Link>
+            <button className="btn btn-secondary btn-sm" onClick={handleOpenEditContest}>
+              Chỉnh sửa
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowExportModal(true)}>
+              Xuất đề
+            </button>
             <button
               className={`btn btn-sm ${contest.status === 'active' ? 'btn-danger' : 'btn-primary'}`}
               onClick={toggleStatus}
@@ -573,6 +600,43 @@ export default function ContestDetailPage({ params }: { params: Promise<{ id: st
               <button className="btn btn-primary" onClick={saveDetail} disabled={detailModal.saving}>
                 {detailModal.saving ? 'Đang lưu...' : 'Lưu và Cập nhật toàn bộ'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contest Modal */}
+      {showExportModal && contest && (
+        <ExportContestModal contest={{ id: contest.id, title: contest.title }} onClose={() => setShowExportModal(false)} />
+      )}
+
+      {showEditContestModal && contest && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="card" style={{ width: '90vw', maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.5rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.2rem' }}>Chỉnh sửa thông tin đề thi</h3>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>Tên đề thi</label>
+              <input
+                type="text"
+                className="input"
+                style={{ width: '100%' }}
+                value={editContestData.title}
+                onChange={(e) => setEditContestData({ ...editContestData, title: e.target.value })}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>Thời gian làm bài (phút)</label>
+              <input
+                type="number"
+                className="input"
+                style={{ width: '100%' }}
+                value={editContestData.time_limit}
+                onChange={(e) => setEditContestData({ ...editContestData, time_limit: parseInt(e.target.value) || 0 })}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowEditContestModal(false)}>Hủy</button>
+              <button className="btn btn-primary" onClick={handleSaveContest}>Lưu thay đổi</button>
             </div>
           </div>
         </div>

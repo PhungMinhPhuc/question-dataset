@@ -68,27 +68,45 @@ def normalize_textbf_whitespace(text: str) -> str:
 def unescape_pandoc_math(text: str) -> str:
     """Khôi phục các ký tự toán học bị Pandoc escape khi nó coi là plain text (vd từ Togtex)."""
     text = text.replace(r'\$', '$')
-    # These patterns must be handled BEFORE the generic \textbackslash replacement,
-    # otherwise the two-step substitution would destroy the backslash they depend on.
+
+    def _unescape_togtex(s):
+        s = re.sub(r'\\textbackslash\\textbackslash(?:\{\})?', r'\\\\', s)
+        s = s.replace(r'\textbackslash ', '\\')
+        s = s.replace(r'\textbackslash', '\\')
+        s = s.replace(r'\{', '{')
+        s = s.replace(r'\}', '}')
+        s = s.replace(r'\^{}', '^')
+        s = s.replace(r'\_', '_')
+        s = s.replace(r'\~{}', '~')
+        s = s.replace(r'\>', '>')
+        s = s.replace(r'\<', '<')
+        s = s.replace(r'\textasciitilde{}', r'\sim')
+        s = s.replace(r'\textasciitilde', r'\sim')
+        s = s.replace(r'\&', '&')
+        return s
+
+    def _replacer(match):
+        prefix = match.group(1)
+        s = match.group(2)
+        
+        if prefix == '$$':
+            return '$$' + _unescape_togtex(s) + '$$'
+        elif prefix == '$':
+            return '$' + _unescape_togtex(s) + '$'
+        elif prefix == r'\textbackslash{[' + '}':
+            return r'\[' + _unescape_togtex(s) + r'\]'
+        elif prefix == r'\textbackslash(':
+            return r'\(' + _unescape_togtex(s) + r'\)'
+        return match.group(0)
+
+    # Unescape Togtex math blocks (which Pandoc escaped as plain text)
+    pattern = r'(\$\$|\$|\\textbackslash\{\[\}|\\textbackslash\()(.*?)(\$\$|\$|\\textbackslash\{\]\}|\\textbackslash\))'
+    text = re.sub(pattern, _replacer, text, flags=re.DOTALL)
+
+    # These patterns must be handled for OMML display math or leftovers
     # \textbackslash{[} / {]} → display-math delimiters \[ / \]
     text = text.replace(r'\textbackslash{[}', r'\[')
     text = text.replace(r'\textbackslash{]}', r'\]')
-    # \textbackslash\textbackslash{} → \\ (LaTeX row-break in align/array)
-    text = re.sub(r'\\textbackslash\\textbackslash(?:\{\})?', r'\\\\', text)
-    text = text.replace(r'\textbackslash ', '\\')
-    text = text.replace(r'\textbackslash', '\\')
-    text = text.replace(r'\{', '{')
-    text = text.replace(r'\}', '}')
-    text = text.replace(r'\^{}', '^')
-    text = text.replace(r'\_', '_')
-    text = text.replace(r'\~{}', '~')
-    text = text.replace(r'\>', '>')
-    text = text.replace(r'\<', '<')
-    # \textasciitilde inside math should be \sim (≈), not the text-mode tilde command
-    text = text.replace(r'\textasciitilde{}', r'\sim')
-    text = text.replace(r'\textasciitilde', r'\sim')
-    # \& inside align/array is an alignment marker; the escape is wrong in math contexts
-    text = text.replace(r'\&', '&')
     # \textbar is pandoc's escape for | — use \vert so it renders in KaTeX and
     # does not break markdown table cell delimiters
     text = re.sub(r'\\textbar(?:\{\})?', r'\\vert ', text)
@@ -158,7 +176,10 @@ def fix_misplaced_right_dot(text: str) -> str:
 def simplify_pandoc_tables(tex: str) -> str:
     """Converts Pandoc's longtable+minipage mess into LaTeX array environments for KaTeX."""
     def _strip_math_delimiters(c: str) -> str:
-        """Remove dollar-sign math wrappers from cell (array env is already in math mode)."""
+        """Remove math wrappers from cell (array env is already in math mode)."""
+        c = re.sub(r'\\\[(.+?)\\\]', r'\1', c, flags=re.DOTALL)
+        c = re.sub(r'\\\((.+?)\\\)', r'\1', c, flags=re.DOTALL)
+        c = re.sub(r'\$\$(.+?)\$\$', r'\1', c, flags=re.DOTALL)
         c = re.sub(r'\\\$(.+?)\\\$', r'\1', c, flags=re.DOTALL)
         c = re.sub(r'\$(.+?)\$', r'\1', c, flags=re.DOTALL)
         return c
@@ -180,8 +201,10 @@ def simplify_pandoc_tables(tex: str) -> str:
             line = line.strip()
             if not line: continue
             cells = []
-            for c in line.split('&'):
+            for c in re.split(r'(?<!\\)&', line):
                 c = c.strip().replace('\n', ' ')
+                # Remove alignment commands which are invalid in math array mode
+                c = re.sub(r'\\(?:centering|raggedright|raggedleft)\s*', '', c)
                 # Strip \textbf{} wrappers; allow escaped-brace sequences (\{ \}) inside
                 c = re.sub(r'\\textbf\{((?:[^{}\\]|\\.)*)\}', r'\1', c)
                 # Drop WMF/EMF image refs left by un-converted MathType equations
@@ -245,6 +268,16 @@ def convert_docx_to_tex(docx_path: str, media_dir: str, progress_cb=None) -> str
     content = unescape_pandoc_math(content)
     content = fix_misplaced_right_dot(content)
 
+    # Đưa tất cả các định dạng toán về $ ... $ (inline math) theo yêu cầu
+    content = re.sub(r'\\\[(.*?)\\\]', r'$\1$', content, flags=re.DOTALL)
+    content = re.sub(r'\\\((.*?)\\\)', r'$\1$', content, flags=re.DOTALL)
+    content = re.sub(r'\$\$(.*?)\$\$', r'$\1$', content, flags=re.DOTALL)
+
+    # Remove excessive blank lines around display math \[ \] or $$ to prevent huge gaps in frontend
+    # (Đã chuyển thành $ ở trên, nhưng giữ lại rules cũ phòng hờ)
+    content = re.sub(r'\n{2,}(\\\[|\$\$)', r'\n\1', content)
+    content = re.sub(r'(\\\]|\$\$)\n{2,}', r'\1\n', content)
+
     # Save the unescaped content back so downstream functions get clean LaTeX
     with open(tex_path, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -261,8 +294,8 @@ def convert_docx_to_tex(docx_path: str, media_dir: str, progress_cb=None) -> str
         return tex_path
     else:
         # Check Standardized vs Standard
-        from parse_docx_standardized import extract_standardized_tables, convert_standardized_docx_to_tex
-        from parse_docx_standard import convert_standard_docx_to_tex
+        from .parse_docx_standardized import extract_standardized_tables, convert_standardized_docx_to_tex
+        from .parse_docx_standard import convert_standard_docx_to_tex
 
         answers = extract_standardized_tables(docx_path)
         has_standardized_answers = bool(answers['P1'] or answers['P2'] or answers['P3'])

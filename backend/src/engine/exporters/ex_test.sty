@@ -1979,21 +1979,19 @@
 \xdef\DGNL{0}
 \def\fromchc{Dựa vào thông tin dưới đây để trả lời các câu từ}
 \def\tochc{ đến }\def\parchc{\par}%
-\newcommand{\sochc}[2][]{}
+\newcommand{\sochc}[3][]{}
 \AtBeginEnvironment{ex}{%
 	\xdef\DGNL{0}%
-	\renewcommand{\sochc}[2][\fromchc]{%
-		\savebox{\imboxtext}{\vbox{\noindent\ignorespaces#2}}%
+	\renewcommand{\sochc}[3][\fromchc]{%
+		\savebox{\imboxtext}{\vbox{\noindent\ignorespaces#3}}%
 		\noindent%
 		\xdef\DGNL{1}%
 		\pgfmathsetmacro{\endchcs}{int(#2+\theex-1)}%
 		\xdef\numendchc{\endchcs}%
 		\gdef\numchc{#2}%
-	%	\let\chc\ex%
 		\vspace{-0.75\baselineskip}\par\noindent%
 		\textit{#1 \theex\tochc\numendchc.}%
-		\vspace{0\baselineskip}\parchc\noindent\ignorespaces%
-		\par\noindent\ignorespaces%
+		\parchc\noindent\ignorespaces#3\unskip%
 		\addtocounter{ex}{-1}\ignorespaces%
 	}
 	\ifnum\value{ifex}>1{\noindent\large\bfseries\color{magenta}Câu dưới này dùng môi trường \{chc\} mới đúng!}\color{blue}\fi%
@@ -2153,7 +2151,7 @@
 		\ifthenelse{\equal{#1}{thm}}
 			{\savebox{\imboxtext}{\vbox{#2}}\def\title{\protect\leavevmode\mbox{\labelthmfull}}
 				\xdef\saveFileAns{}\xdef\keyEX{}\setcounter{dapan}{0}}
-			{\par\noindent\def\title{}%
+			{\def\title{}%
 				\ifthenelse{\equal{#1}{}}{}
 					{\def\IMheight{#1\linewidth}}}
 		\tcbset{before={\parindent=0pt},before skip=\baselineskip-6pt}%
@@ -2167,7 +2165,7 @@
 		\ifthenelse{\equal{#1}{thm}}
 			{\savebox{\imboxtext}{\vbox{#2}}\def\title{\protect\leavevmode\mbox{\labelthmfull}}%
 				\xdef\saveFileAns{}\xdef\keyEX{}\setcounter{dapan}{0}}
-			{\par\noindent\def\title{}%
+			{\def\title{}%
 				\ifthenelse{\equal{#1}{}}{}
 					{\def\IMheight{#1\linewidth}}}%
 		\tcbset{before={\parindent=0pt},before skip=\baselineskip-6pt}%

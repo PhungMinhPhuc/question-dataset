@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {};
@@ -113,6 +113,9 @@ export const api = {
 
   getContest: (id: number) => apiFetch(`/contests/${id}`),
 
+  updateContest: (id: number, data: object) =>
+    apiFetch(`/contests/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
   getContestSubmissions: (id: number) => apiFetch(`/contests/${id}/submissions`),
 
   deleteResult: (id: number) => apiFetch(`/contests/results/${id}`, { method: 'DELETE' }),
@@ -128,39 +131,11 @@ export const api = {
   updateContestStatus: (id: number, status: string) =>
     apiFetch(`/contests/${id}/status?status=${status}`, { method: 'PATCH' }),
 
-  exportContest: async (id: number, data: object) => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const res = await fetch(`${API_URL}/export/exam/${id}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      body: JSON.stringify(data)
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || 'Export failed');
-    }
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    // Lấy filename từ header Content-Disposition nếu có
-    const contentDisposition = res.headers.get('Content-Disposition');
-    let filename = `Export_Contest_${id}.zip`;
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-      if (filenameMatch && filenameMatch.length === 2) {
-        filename = filenameMatch[1];
-      }
-    }
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-  },
+  exportContest: (id: number, data: object) =>
+    apiFetch(`/export/exam/${id}`, { method: 'POST', body: JSON.stringify(data) }),
+
+  getExportStatus: (taskId: string) =>
+    apiFetch(`/export/status/${taskId}`),
 };
 
 export default api;

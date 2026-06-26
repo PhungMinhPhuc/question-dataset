@@ -47,6 +47,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
  const [submitting, setSubmitting] = useState(false);
  const [error, setError] = useState('');
  const [score, setScore] = useState<number | null>(null);
+ const [maxScore, setMaxScore] = useState<number | null>(null);
 
  // Answers: question_id -> student_choice string
  const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -66,6 +67,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
 
  // shuffle function
  const shuffleArray = (arr: any[]) => {
+  if (user?.role === 'teacher') return [...arr]; // Không đảo đối với giáo viên
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));
@@ -171,7 +173,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
  });
 
  return { list, blocks };
- }, [questions]);
+ }, [questions, user?.role]);
 
  const handleStart = async () => {
  if (isGuest && !guestName.trim()) { setError('Vui lòng nhập tên của bạn'); return; }
@@ -226,6 +228,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
   answers: submissionAnswers
   });
   setScore(res.total_score);
+  setMaxScore(res.max_score ?? null);
   setStage('done');
  } catch (e: unknown) {
   setError(e instanceof Error ? e.message : 'Lỗi nộp bài');
@@ -307,7 +310,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
   {score !== null && (
    <div style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.15)', borderRadius: 'var(--radius-lg)', padding: '2rem', marginBottom: '2rem' }}>
    <div style={{ fontSize: '3.5rem', fontWeight: 800, color: 'var(--accent-primary)' }}>
-    {score.toFixed(2)}
+    {score.toFixed(2)}{maxScore !== null && <span style={{ fontSize: '1.75rem', color: 'var(--text-secondary)' }}>/{maxScore.toFixed(2)}</span>}
    </div>
    <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Điểm của bạn</div>
    </div>
@@ -335,7 +338,7 @@ export default function ExamPage({ params }: { params: Promise<{ id: string }> }
   </div>
   <ExamTimer totalSeconds={(contest?.time_limit || 45) * 60} onExpire={() => handleSubmit(true)} />
   <button id="btn-submit-exam" className="btn btn-primary" onClick={() => handleSubmit(false)} disabled={submitting}>
-   {submitting ? <span className="spinner" /> : 'Nộp bài ✓'}
+   {submitting ? <span className="spinner" /> : 'Nộp bài'}
   </button>
   </div>
 
