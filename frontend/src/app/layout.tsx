@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import FloatingChatbot from "@/components/FloatingChatbot";
 
 export const metadata: Metadata = {
  title: "Hệ thống",
@@ -13,7 +14,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
  <html lang="vi" suppressHydrationWarning data-scroll-behavior="smooth">
   <head />
   <body suppressHydrationWarning>
-  <AuthProvider>{children}</AuthProvider>
+  <AuthProvider>
+    {children}
+    <FloatingChatbot />
+  </AuthProvider>
   {/* MathJax: afterInteractive tránh SSR trong <head>, loại bỏ hydration mismatch */}
   <Script
    id="MathJax-config"

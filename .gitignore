@@ -43,6 +43,14 @@ test_*.tex
 test_*.pdf
 test_*.txt
 
+# ===== Model weights (tải riêng, KHÔNG đưa vào git) =====
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.weights
+
 # ===== Build / output =====
 build/
 dist/

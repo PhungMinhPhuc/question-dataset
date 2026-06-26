@@ -77,6 +77,7 @@ export default function Sidebar() {
  { href: '/classes', icon: '', label: 'Lớp học' },
  { href: '/contests', icon: '', label: 'Đề thi' },
  { href: '/contests/new', icon: '', label: 'Tạo đề thi' },
+ { href: '/ai', icon: '', label: 'AI' },
  ];
 
  const studentNav = [

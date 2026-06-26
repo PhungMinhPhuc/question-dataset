@@ -39,11 +39,12 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Cache-Control"] = "no-cache"
         return response
 
-IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", "./storage")
+_default_storage = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage"))
+IMG_STORAGE_PATH = os.getenv("IMG_STORAGE_PATH", _default_storage)
 os.makedirs(IMG_STORAGE_PATH, exist_ok=True)
 app.mount("/static/images", NoCacheStaticFiles(directory=IMG_STORAGE_PATH), name="images")
 
-from routers import auth, questions, upload, classes, contests, export
+from routers import auth, questions, upload, classes, contests, export, ai
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
@@ -52,6 +53,7 @@ app.include_router(upload.router)
 app.include_router(classes.router)
 app.include_router(contests.router)
 app.include_router(export.router)
+app.include_router(ai.router)
 
 
 @app.get("/")
