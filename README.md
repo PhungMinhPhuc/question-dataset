@@ -1,5 +1,9 @@
 # Tổng quan dự án: Hệ thống CSDL Ngân hàng Câu hỏi
 
+> Đây là repository của đồ án môn Cơ sở dữ liệu và được giữ lại làm phiên bản học thuật
+> theo liên kết đã công bố trong báo cáo. Phiên bản sản phẩm đang tiếp tục được phát triển
+> tại [ExamForge Platform](https://github.com/PhungMinhPhuc/examforge-platform).
+
 Dự án này là một hệ thống quản lý cơ sở dữ liệu ngân hàng câu hỏi, cho phép xử lý, lưu trữ, và trích xuất câu hỏi từ nhiều định dạng khác nhau (DOCX, JSON, v.v.) và cung cấp giao diện người dùng thông qua ứng dụng web.
 
 ## Kiến trúc dự án (Architecture)
